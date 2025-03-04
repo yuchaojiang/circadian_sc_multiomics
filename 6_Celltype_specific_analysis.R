@@ -309,7 +309,9 @@ se_genes %>%
     rownames(motif_norm) <- gene_
     motif_norm
   } -> motif_norm
+####
 
+#Extract cell name for each group (ZT and celltype)
 list.files(path = "~/Dropbox/singulomics/github_rda", pattern = "cellnames\\.rds", full.names = T) %>% 
   "names<-"(., gsub("/.+/(.+)_cellnames\\.rds", "\\1", .)) %>% 
   .[c("Hepatocytes", "Endothelial_cells", "Fibroblasts", "Kupffer_cells")] %>%
@@ -355,3 +357,189 @@ c(seq(10,200,10)) %>%
         x[[seed_]]
       }) %>% purrr::reduce(., c) -> cellnames
   }) -> list_tmp
+
+  ####
+
+c("Arntl", "Bhlhe40", "Bhlhe41", "Clock", "Npas2", "Dbp", "Nfil3", "Nr1d1", "Rorc", 
+  "Cry1", "Ciart", "Per1", "Per2") %>% rev() -> se_genes
+
+#RNA expression dot plot
+list_tmp %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    seed_ = y
+    cells_ = x
+    sc_meta[cells_, ] -> meta_df_
+    se_genes %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        gene_ = x
+        levels_ %>% 
+          "names<-"(.,.) %>% 
+          map(function(x){
+            celltype_ZT_ = x
+            meta_df_ %>% filter(celltype_ZT == celltype_ZT_) %>% rownames() -> cells_
+            RNA_norm[gene_, cells_] %>% mean() -> mean_expression
+            non_zero_cell = sum(RNA_norm[gene_, cells_] > 0)
+            non_zero_proportion = 100*(non_zero_cell/length(cells_))
+            data.frame(Gene = gene_, Celltype_ZT = celltype_ZT_, Mean_expression = mean_expression, non_zero_proportion = non_zero_proportion)
+          }) %>% do.call(rbind, .)
+      }) %>% do.call(rbind, .) -> df_
+    
+    df_ %>% 
+    "rownames<-"(., 1:nrow(.)) %>% 
+      mutate(Celltype_ZT = factor(Celltype_ZT, levels = levels_)) -> df_
+    
+    df_ %>% 
+      group_by(Gene) %>%
+      group_map(function(x,y){
+        df_ = x
+        df_ %>% mutate(Scaled_mean_expression = scales::rescale(x = Mean_expression, to = c(0,1))) -> df_
+      }, .keep = T) %>% 
+      do.call(rbind, .) %>% 
+      mutate(Gene = factor(Gene, levels = se_genes)) -> df_
+    
+      df_ %>% 
+        ggplot(aes(x = Celltype_ZT, y = Gene)) + 
+        geom_point(aes(size = non_zero_proportion, color = Scaled_mean_expression)) + 
+        scale_size(range = c(0, 6), limits = c(min(df_$non_zero_proportion), 100)) + 
+        scale_color_gradient(low = "grey", high = "blue") +
+        scale_x_discrete(guide = guide_axis(angle = 90)) + 
+        theme_classic() -> p_dot_scaled
+      
+      p_dot_scaled + ggtitle(sprintf("%s", seed_)) -> p_dot_scaled
+    
+  }) -> list_tmp_1
+list_p_dot_RNA_scaled = list_tmp_1 ; rm(list_tmp_1)
+####
+
+#ATAC activity dot plot
+list_tmp %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    seed_ = y
+    cells_ = x
+    sc_meta[cells_, ] -> meta_df_
+    se_genes %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        gene_ = x
+        levels_ %>% 
+          "names<-"(.,.) %>% 
+          map(function(x){
+            celltype_ZT_ = x
+            meta_df_ %>% filter(celltype_ZT == celltype_ZT_) %>% rownames() -> cells_
+            gene_activity_norm[gene_, cells_] %>% mean() -> mean_expression
+            non_zero_cell = sum(gene_activity_norm[gene_, cells_] > 0)
+            non_zero_proportion = 100*(non_zero_cell/length(cells_))
+            data.frame(Gene = gene_, Celltype_ZT = celltype_ZT_, Mean_expression = mean_expression, non_zero_proportion = non_zero_proportion)
+          }) %>% do.call(rbind, .)
+      }) %>% do.call(rbind, .) -> df_
+    
+    df_ %>% 
+      "rownames<-"(., 1:nrow(.)) %>% 
+      mutate(Celltype_ZT = factor(Celltype_ZT, levels = levels_)) -> df_
+    
+    df_ %>% 
+      group_by(Gene) %>%
+      group_map(function(x,y){
+        df_ = x
+        df_ %>% mutate(Scaled_mean_expression = scales::rescale(x = Mean_expression, to = c(0,1))) -> df_
+      }, .keep = T) %>% 
+      do.call(rbind, .) %>% 
+      mutate(Gene = factor(Gene, levels = se_genes)) -> df_
+    
+    df_ %>% 
+      ggplot(aes(x = Celltype_ZT, y = Gene)) + 
+      geom_point(aes(size = non_zero_proportion, color = Scaled_mean_expression)) + 
+      scale_size(range = c(0, 6), limits = c(min(df_$non_zero_proportion), 100)) + 
+      scale_color_gradient(low = "grey", high = "red") +
+      scale_x_discrete(guide = guide_axis(angle = 90)) + 
+      theme_classic() -> p_dot_scaled
+    
+    p_dot_scaled + ggtitle(sprintf("%s", seed_)) -> p_dot_scaled
+    
+  }) -> list_tmp_1
+list_p_dot_gene_activity_scaled = list_tmp_1 ; rm(list_tmp_1)
+####
+
+#Motif score dot plot
+list_tmp %>% 
+#  .[9] %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    seed_ = y
+    print(seed_)
+    cells_ = x
+    sc_meta[cells_, ] -> meta_df_
+#    se_genes %>% 
+    rownames(motif_norm) %>% 
+      "names<-"(.,.) %>% 
+#      .[1] %>% 
+      map(function(x){
+        gene_ = x
+#        print(gene_)
+        levels_ %>% 
+          "names<-"(.,.) %>% 
+          map(function(x){
+            celltype_ZT_ = x
+            meta_df_ %>% filter(celltype_ZT == celltype_ZT_) %>% rownames() -> cells_
+            motif_norm[gene_, cells_] %>% unlist() %>% mean() -> mean_expression
+            non_zero_cell = sum(motif_norm[gene_, cells_] > 0)
+            non_zero_proportion = 100*(non_zero_cell/length(cells_))
+            data.frame(Gene = gene_, Celltype_ZT = celltype_ZT_, Mean_expression = mean_expression, non_zero_proportion = non_zero_proportion)
+          }) %>% do.call(rbind, .)
+      }) %>% do.call(rbind, .) -> df_
+    
+    df_ %>% 
+      "rownames<-"(., 1:nrow(.)) %>% 
+      mutate(Celltype_ZT = factor(Celltype_ZT, levels = levels_)) -> df_
+    
+    df_ %>% 
+      group_by(Gene) %>%
+      group_map(function(x,y){
+        df_ = x
+        df_ %>% mutate(Scaled_mean_expression = scales::rescale(x = Mean_expression, to = c(0,1))) -> df_
+      }, .keep = T) %>% 
+      do.call(rbind, .) %>% 
+      mutate(Gene = factor(Gene, levels = rownames(motif_norm))) -> df_
+    
+    df_ %>% 
+      ggplot(aes(x = Celltype_ZT, y = Gene)) + 
+      geom_point(aes(size = non_zero_proportion, color = Scaled_mean_expression)) + 
+#      scale_size(range = c(0, 6), limits = c(min(df_$non_zero_proportion), 100)) + 
+      scale_size(range = c(0, 6), limits = c(0, 100)) + 
+      scale_color_gradient(low = "grey", high = "purple") +
+      scale_x_discrete(guide = guide_axis(angle = 90)) + 
+      theme_classic() -> p_dot_scaled
+    
+    p_dot_scaled + ggtitle(sprintf("%s", seed_)) -> p_dot_scaled
+    
+  }) -> list_tmp_1
+list_p_dot_motif_scaled = list_tmp_1 ; rm(list_tmp_1)
+####
+
+list(
+  RNA = list_p_dot_RNA_scaled$seed_90$data, 
+  ATAC_activity = list_p_dot_gene_activity_scaled$seed_90$data,
+  Motif_score = list_p_dot_motif_scaled$seed_90$data
+) %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    assay_ = y
+    df_ = x
+    df_ %>% dplyr::mutate(Gene = stringr::str_to_title(Gene)) -> df_
+    gene_level_ = c("Rorc", "Nr1d1", "Nfil3", "Dbp", "Npas2", "Clock", "Bhlhe41", "Bhlhe40", "Arntl")
+    df_ %>% dplyr::filter(Gene %in% gene_level_) %>% 
+      dplyr::mutate(Gene = factor(Gene, levels = gene_level_)) -> df_
+    head(df_)
+    color_ = list(RNA = "blue", ATAC_activity = "red", Motif_score = "purple")
+    df_ %>% 
+      ggplot(aes(x = Celltype_ZT, y = Gene)) + 
+      geom_point(aes(size = non_zero_proportion, color = Scaled_mean_expression)) + 
+      #      scale_size(range = c(0, 6), limits = c(min(df_$non_zero_proportion), 100)) + 
+      scale_size(range = c(0, 6), limits = c(0, 100)) + 
+      scale_color_gradient(low = "grey", high = color_[[assay_]]) +
+      scale_x_discrete(guide = guide_axis(angle = 90)) + 
+      theme_classic() -> p_dot_scaled
+    p_dot_scaled + 
+      xlab(NULL) + ylab(NULL) + 
+      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+  }) -> p_list
+patchwork::wrap_plots(p_list, nrow = 3) #Fig_2A ----
