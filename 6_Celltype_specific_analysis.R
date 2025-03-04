@@ -543,3 +543,203 @@ list(
       theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
   }) -> p_list
 patchwork::wrap_plots(p_list, nrow = 3) #Fig_2A ----
+
+# 4. Draw violin plot for celltype specific marker genes (RNA expression and ATAC activity) ----
+
+library(tidyverse)
+library(Seurat)
+library(Signac)
+library(patchwork)
+
+# Read data
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+readRDS("~/Dropbox/singulomics/github_rda/Hepatocytes_cellnames.rds") -> hep_cells
+readRDS("~/Dropbox/singulomics/github_rda/Endothelial_cells_cellnames.rds") -> endo_cells
+readRDS("~/Dropbox/singulomics/github_rda/Fibroblasts_cellnames.rds") -> fibro_cells
+readRDS("~/Dropbox/singulomics/github_rda/Kupffer_cells_cellnames.rds") -> kupffer_cells
+readRDS("~/Dropbox/singulomics/github_rda/T_cells_cellnames.rds") -> t_cells
+readRDS("~/Dropbox/singulomics/github_rda/B_cells_cellnames.rds") -> b_cells
+readRDS("~/Dropbox/singulomics/github_rda/Cholangiocytes_cellnames.rds") -> cho_cells
+
+sc = sc[,c(hep_cells, endo_cells, fibro_cells, kupffer_cells, t_cells, b_cells, cho_cells)]
+
+source("~/Dropbox/singulomics/github/Stacked_Vlnplot.R")
+c("Ebf1", "Slc5a1", "Stab2", "Dcn", "Egfr", "Clec4f", "Skap1") -> se_genes
+
+StackedVlnPlot(obj = sc, features = se_genes, assay_ = "SCT") -> p_1 #Fig_1C ----
+StackedVlnPlot(obj = sc, features = se_genes, assay_ = "gene_activity") -> p_2 #Fig_1C ----
+####
+
+# 5. Draw time-serise heatmap for marker genes in pseudo-bulk data (RNA expression and ) ----
+library(tidyverse)
+library(Seurat)
+library(Signac)
+#Read data
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+
+#Generate normalized RNA expression matrix 
+sc@assays$RNA@counts %>% 
+  as.data.frame() %>% 
+  mutate(across(everything(), function(x){(x/sum(x))*median(sc@meta.data$nCount_RNA)})) -> RNA_norm
+####
+
+#Generate normalized ATAC acitivty matrix 
+sc@assays[["ATAC"]]@fragments[[1]]@path <- "~/Dropbox/singulomics/aggregate_analysis/atac_fragments.tsv.gz"
+DefaultAssay(sc) <- "ATAC"
+gene.activities <- GeneActivity(sc, extend.upstream = 2000, biotypes = NULL)
+
+gene.activities %>% colSums() %>% median() -> gene_activity_median
+
+gene.activities %>% 
+  as.data.frame() %>%
+  mutate(across(everything(), function(x){(x/sum(x))*gene_activity_median})) %>% 
+  as.matrix() -> gene_activity_norm
+gene_activity_norm %>% as.data.frame() -> gene_activity_norm
+rm(gene.activities)
+####
+
+####
+sc_meta = sc@meta.data
+rm(sc)
+gc()
+####
+
+#Extract rhythmic genes from Hughes liver data
+read.csv("~/Dropbox/singulomics/github_rda/Hughes_Liver_circadian_genes.csv", header = T, stringsAsFactors = F) %>% 
+  dplyr::filter(BH.Q < 0.01) %>% 
+  dplyr::arrange(LAG) %>% 
+  .$Gene.Symbol %>%
+  str_split(" /// ") %>% 
+  unlist() %>% 
+  as.data.frame() %>% 
+  "colnames<-"(., "Gene") %>% 
+  dplyr::mutate(idx = 1:nrow(.)) %>% 
+  dplyr::filter(Gene %in% rownames(RNA_norm)) %>% 
+  dplyr::arrange(idx) %>% 
+  .$Gene %>% unique() -> circadian_genes
+####
+
+Core_clock_genes = c("Arntl", "Bhlhe40", "Bhlhe41", "Clock", "Npas2", "Dbp", "Nfil3", "Nr1d1", "Rorc", "Cry1", "Ciart", "Per1", "Per2")
+
+#Extract KO cells
+list_tmp = list()
+sc_meta %>% dplyr::filter(grepl("KO", group)) %>% 
+  {
+    df_KO = .
+    c("KO1", "KO2") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        group_ = x
+        df_KO %>% filter(group == x) -> df_KO
+        rownames(df_KO) -> cells_
+        c("RNA", "ATAC") %>% 
+          "names<-"(.,.) %>% 
+          map(function(x){
+            assay_ = x
+            if (x == "RNA"){
+              RNA_norm[circadian_genes, cells_] -> df_norm
+            }
+            if (x == "ATAC"){
+                gene_activity_norm[circadian_genes, cells_] -> df_norm
+            }
+            list_tmp[[group_]][[assay_]] <<- df_norm
+            df_norm %>% rowMeans() %>% as.data.frame() %>% "colnames<-"(., group_) -> df_norm
+            df_norm
+          })
+      })
+  } -> KO_list
+####
+
+#Extract WT samples
+c("~/Dropbox/singulomics/github_rda/Hepatocytes_cellnames.rds", 
+  "~/Dropbox/singulomics/github_rda/Endothelial_cells_cellnames.rds",
+  "~/Dropbox/singulomics/github_rda/Fibroblasts_cellnames.rds",
+  "~/Dropbox/singulomics/github_rda/Kupffer_cells_cellnames.rds", 
+  "~/Dropbox/singulomics/github_rda/Cholangiocytes_cellnames.rds",
+  "~/Dropbox/singulomics/github_rda/B_cells_cellnames.rds", 
+  "~/Dropbox/singulomics/github_rda/T_cells_cellnames.rds") %>% 
+  map(function(x){
+    readRDS(x) -> cells_
+  }) %>% purrr::reduce(., c) -> WT_cells
+
+sprintf("ZT%02d", seq(2,22,4)) %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    ZT_ = x
+    sc_meta[WT_cells, ] %>% dplyr::filter(ZT == ZT_) -> df_meta
+    rownames(df_meta) -> cells_
+    c("RNA", "ATAC") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        assay_ = x
+        if (x == "RNA"){
+          RNA_norm[circadian_genes, cells_] -> df_norm
+        }
+        if (x == "ATAC"){
+          gene_activity_norm[circadian_genes, cells_] -> df_norm
+        }
+        list_tmp[[ZT_]][[assay_]] <<- df_norm
+        df_norm %>% rowMeans() %>% as.data.frame() %>% "colnames<-"(., ZT_) -> df_norm
+        df_norm
+      })
+  }) -> WT_list
+
+#Rhythmicity detection (JTKcycle and HR)
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+
+WT_list %>% 
+  map(function(list_){
+    list_$RNA
+  }) %>% do.call(cbind, .) %>% 
+#  head() %>% 
+  {
+    df_ = .
+    df_ %>% "colnames<-"(., sprintf("%s_REP1", colnames(.))) -> df_
+    Gene_ = rownames(df_)
+    df_ %>% as_tibble() -> df_
+    timepoints_ = seq(2,22,4)
+    cyclic_HMP(exp_matrix = df_, gene = Gene_, timepoints = timepoints_) -> res_
+    res_ %>% dplyr::select(Gene, HR_phi) %>% dplyr::mutate(phase = (HR_phi/(2*pi))*24) -> res_
+    res_
+  } -> phase_df
+
+circadian_genes %>% 
+  as.data.frame() %>% 
+  "colnames<-"(., "Gene") %>% 
+  left_join(x = ., y = phase_df, by = "Gene") %>% 
+  dplyr::arrange(phase) -> phase_df
+
+phase_df$Gene -> circadian_genes
+circadian_genes %>% rev() -> circadian_genes
+####
+
+#Generate heatmap matrix
+c("RNA", "ATAC") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    type_ = x
+    WT_list %>% 
+      map(function(x){
+        x[[type_]] -> df_
+      }) %>% purrr::reduce(., cbind) -> df_
+    apply(df_, 1, function(x){scales::rescale(x, to = c(0,1))}) %>% 
+      t() %>% 
+      as.data.frame() -> df_
+  }) -> heatmap_mat
+
+heatmap_mat %>% 
+  map(function(df_){
+    df_[phase_df$Gene, ] -> df_
+  }) -> heatmap_mat
+
+circadian_genes %>% ifelse(. %in% Core_clock_genes, ., "") -> labels_
+ggplotify::as.ggplot(
+  pheatmap::pheatmap(mat = heatmap_mat$RNA, cluster_rows = F, cluster_cols = F, labels_row = labels_, , color = colorRampPalette(c("#324084", "#f0e939"))(50))
+) -> p_RNA
+
+ggplotify::as.ggplot(
+  pheatmap::pheatmap(mat = heatmap_mat$ATAC, cluster_rows = F, cluster_cols = F, labels_row = labels_, , color = colorRampPalette(c("#324084", "#f0e939"))(50))
+) -> p_ATAC
+
+patchwork::wrap_plots(p_RNA, p_ATAC, ncol = 2) + patchwork::plot_annotation(title = "1997 circadian genes (Hughes et al. 2009)") #Fig_2D ----
+####
