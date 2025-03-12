@@ -247,7 +247,7 @@ res_ %>%
   })
 #####
 
-####Extract cell barcode within cell cluster
+#### Cell partitioning using monocle3
 library(monocle3)
 readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
 sc@meta.data$group %>% unique()
@@ -812,4 +812,373 @@ ggplotify::as.ggplot(
 ) -> p_ATAC
 
 patchwork::wrap_plots(p_RNA, p_ATAC, ncol = 2) + patchwork::plot_annotation(title = "1997 circadian genes (Hughes et al. 2009)") #Fig_1D ----
+####
+
+# 7. Generate celltype specifc rhythmic genes table (RNA expression and ATAC activity) ----
+c("Hepatocytes", "Endothelial_cells", "Fibroblasts", "Kupffer_cells") %>% 
+  "names<-"(.,.) %>% 
+#  .[1] %>% 
+  map(function(celltype_){
+    c("RNA", "gene_activity") %>% 
+      "names<-"(.,.) %>% 
+#      .[1] %>% 
+      map(function(assay_){
+        list.files("~/Dropbox/singulomics/github_rda/output/Celltype_specific/Cauchy_replicate_10", full.names = T) %>% 
+          {.[grepl(celltype_, .)]} %>% {.[grepl(assay_, .)]} %>% gtools::mixedsort() -> files_
+        files_ %>% 
+#          .[1:2] %>% 
+          map(function(file_){
+            seed_ = gsub("/.+/.+_(seed_\\d+?)_.+", "\\1", file_)
+            read.csv(file_, header = T, stringsAsFactors = F) -> df_
+            df_ %>% dplyr::select(matches("Gene|JTK|HR|MetaCycle_meta2d_Base|MetaCycle_meta2d_AMP|MetaCycle_meta2d_rAMP")) -> df_
+            df_[is.na(df_)] <- 1
+            readRDS("~/Dropbox/singulomics/github_rda/output/Celltype_specific/intersect_genes_high_exp.rds") -> highly_expressed_genes
+            df_ %>% column_to_rownames("Gene") %>% .[highly_expressed_genes,] -> df_
+            colnames(df_) = sprintf("%s_%s", seed_, colnames(df_))
+            df_ %>% rownames_to_column("Gene") -> df_
+          }) %>% purrr::reduce(., left_join, by = "Gene") -> df_
+        source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+        recal_cauchy_p_and_hmp(df_) -> df_
+        df_ %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% arrange(cauchy_p) -> df_ 
+        df_ %>% .[,1:3] -> df_pval
+        
+        radian_to_phase = function(radian){
+          phase = (radian/(2*pi))*24
+          return(phase)
+        }
+        df_ %>% dplyr::select(matches("HR_phi")) -> df_phi
+        df_phi %>% dplyr::mutate(across(everything(), function(x){radian_to_phase(radian = x)})) -> df_phi
+        phase = rowMeans(df_phi)
+        df_pval %>% dplyr::mutate(Phase = phase) -> df_pval
+        
+        df_ %>% dplyr::select(matches("meta2d_AMP")) -> df_AMP
+        Mean_Amp = apply(df_AMP, 1, function(x){mean(x)})
+        SD_Amp = apply(df_AMP, 1, function(x){sd(x)})
+        df_pval %>% dplyr::mutate(`Amplitude(Mean)` = Mean_Amp, `Amplitude(SD)` = SD_Amp) -> df_pval
+        
+        df_ %>% dplyr::select(matches("meta2d_Base")) -> df_Base
+        Mean_Base = apply(df_Base, 1, function(x){mean(x)})
+        SD_Base = apply(df_Base, 1, function(x){sd(x)})
+        df_pval %>% dplyr::mutate(`Base(Mean)` = Mean_Base, `Base(SD)` = SD_Base) -> df_pval
+        
+        df_ %>% dplyr::select(matches("meta2d_rAMP")) -> df_rAMP
+        Mean_rAMP = apply(df_rAMP, 1, function(x){mean(x)})
+        SD_rAMP = apply(df_rAMP, 1, function(x){sd(x)})
+        df_pval %>% dplyr::mutate(`rAMP(Mean)` = Mean_rAMP, `rAMP(SD)` = SD_rAMP) -> df_pval
+        
+        list.files("~/Dropbox/singulomics/github_rda/output/Celltype_specific/Raw_data_downsampled/replicate_10", full.names = T) %>% 
+          {.[grepl(assay_, .)]} %>% 
+          {.[grepl(celltype_, .)]} %>% 
+          #          .[1:2] %>% 
+          map(function(file_){
+            read.csv(file_, header = T, stringsAsFactors = F) -> df_2
+            df_2 %>% pivot_longer(-Gene, names_to = "ZT", values_to = "value") -> df_2
+            df_2$ZT = gsub("(ZT\\d+)_.+", "\\1", df_2$ZT)
+            df_2 %>% group_by(Gene, ZT) %>% summarise(Mean = mean(value, na.rm = T)) %>% ungroup() -> df_2
+          }) %>% do.call(rbind, .) %>% group_by(Gene, ZT) %>% summarise(Mean_expr = mean(Mean, na.rm = T)) %>% ungroup() -> df_2
+        df_2 %>% pivot_wider(names_from = ZT, values_from = Mean_expr) -> df_2
+        left_join(df_pval, df_2, by = "Gene") -> df_pval
+      })
+  }) -> df_list_supp_table_1 #Supp_table_1
+
+# 7. Upset plots and venndiagram of cell celltype specfic genes (RNA expression and ATAC activity) ----
+library(ggupset)
+library(ggbreak)
+
+c("RNA", "gene_activity") %>% 
+  "names<-"(.,.) %>% 
+  map(function(assay_){
+    df_list_supp_table_1 %>% 
+      map(function(list_){
+        list_[[assay_]] %>% .$Gene
+      })
+  }) -> ggvenn_list
+
+#RNA
+ggvenn_list$RNA %>% 
+  ggvenn::list_to_data_frame() %>% 
+#  .[1:100, ] %>%  
+  group_by(key) %>% 
+  group_map(function(x,y){
+    celltype_ = list(names(x)[x == T])
+    tibble(Gene = y$key, Celltype = celltype_)
+  }) %>% do.call(rbind, .) %>% 
+  ggplot(aes(x=Celltype)) + 
+  geom_bar() + 
+  geom_text(stat='count', aes(label=after_stat(count)), vjust=-1) +
+  scale_x_upset(n_intersections = 30) + 
+  theme_classic() +
+#  scale_y_break(c(200,2000), scales = 0.5) +
+  ggtitle("RNA") -> p1
+
+ggvenn_list$RNA %>% 
+  ggvenn::list_to_data_frame() %>% 
+  #  .[1:100, ] %>%  
+  group_by(key) %>% 
+  group_map(function(x,y){
+    celltype_ = list(names(x)[x == T])
+    tibble(Gene = y$key, Celltype = celltype_)
+  }) %>% do.call(rbind, .) %>% 
+  ggplot(aes(x=Celltype)) + 
+  geom_bar() + 
+  geom_text(stat='count', aes(label=after_stat(count)), vjust=-1) +
+  scale_x_upset(n_intersections = 30) + 
+  theme_classic() +
+  scale_y_break(c(200,2000), scales = 0.5) +
+  ggtitle("RNA") -> p1_1
+
+ggvenn_list$gene_activity %>% 
+  ggvenn::list_to_data_frame() %>% 
+  #  .[1:100, ] %>%  
+  group_by(key) %>% 
+  group_map(function(x,y){
+    celltype_ = list(names(x)[x == T])
+    tibble(Gene = y$key, Celltype = celltype_)
+  }) %>% do.call(rbind, .) %>% 
+  ggplot(aes(x=Celltype)) + 
+  geom_bar() + 
+  geom_text(stat='count', aes(label=after_stat(count)), vjust=-1) +
+  scale_x_upset(n_intersections = 30) + 
+  theme_classic() +
+  ggtitle("Gene activity") -> p2
+
+ggvenn_list$gene_activity %>% 
+  ggvenn::list_to_data_frame() %>% 
+  #  .[1:100, ] %>%  
+  group_by(key) %>% 
+  group_map(function(x,y){
+    celltype_ = list(names(x)[x == T])
+    tibble(Gene = y$key, Celltype = celltype_)
+  }) %>% do.call(rbind, .) %>% 
+  ggplot(aes(x=Celltype)) + 
+  geom_bar() + 
+  geom_text(stat='count', aes(label=after_stat(count)), vjust=-1) +
+  scale_x_upset(n_intersections = 30) + 
+  theme_classic() +
+  scale_y_break(c(150,400), scales = 0.5) +
+  ggtitle("Gene activity") -> p2_2
+  
+ggpubr::ggarrange(p1, p2, p1_1, p2_2, ncol = 2)
+library(patchwork)
+wrap_plots(p1, p1_1, ncol = 1, nrow = 2) #Fig_2B
+wrap_plots(p2, p2_2, ncol = 1, nrow = 2) #Fig_2B
+
+list(RNA = ggvenn_list$RNA$Hepatocytes, ATAC_activity = ggvenn_list$gene_activity$Hepatocytes) %>% 
+  ggvenn::ggvenn() -> p_3 #Fig_2D
+
+####
+
+# 8. Celltype specific phase enrichment analysis ----
+
+c("Hepatocytes", "Endothelial_cells", "Fibroblasts", "Kupffer_cells") %>% 
+  "names<-"(.,.) %>% 
+  map(function(celltype_){
+    df_list_supp_table_1[[celltype_]]$RNA %>% dplyr::select(Gene, Phase) -> df_
+    output_file = sprintf("~/Dropbox/singulomics/github_rda/output/Celltype_specific/PSEA/input/%s_celltype_specific.txt", celltype_)
+    write.table(df_, file = output_file, quote = F, row.names = F, col.names = F, sep = "\t")
+    print(output_file)
+  })
+
+c("Hepatocytes", "Endothelial_cells", "Fibroblasts", "Kupffer_cells") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    celltype_ = x
+    file_ = sprintf("~/Dropbox/singulomics/github_rda/output/Celltype_specific/PSEA/output/Celltype_specific/%s/results.txt", celltype_)
+    read.table(file = file_, header = T, sep = "\t", stringsAsFactors = F) -> df_
+    
+    df_ %>% 
+      filter(Kuiper.q.value..vs..uniform. < 0.05) %>% dplyr::arrange(Kuiper.q.value..vs..uniform.) -> df_
+    df_ %>% dplyr::filter(grepl("GOBP_.+", Set.ID)) -> df_
+    df_ %>% mutate(Celltype = celltype_, .before = 1) -> df_
+
+  }) -> PSEA_res_list
+
+PSEA_res_list %>% 
+  map2(.x=.,.y=names(.),.f=function(df_, celltype){
+    if (celltype == "Hepatocytes"){df_ %>% dplyr::filter(grepl("GOBP_PEPTIDE_METABOLIC_PROCESS|GOBP_REGULATION_OF_DEFENSE_RESPONSE|GOBP_LIPID_METABOLIC_PROCESS|GOBP_SMALL_MOLECULE_METABOLIC_PROCESS", Set.ID)) -> df_}
+    if (celltype == "Endothelial_cells"){df_ %>% dplyr::filter(grepl("GOBP_CELL_CELL_ADHESION|GOBP_POSITIVE_REGULATION_OF_LOCOMOTION|CELL_CELL_SIGNALING|GOBP_ANGIOGENESIS", Set.ID)) -> df_}
+    if (celltype == "Fibroblasts"){df_ %>% dplyr::filter(grepl("GOBP_CYTOSKELETON_ORGANIZATION|GOBP_SUPRAMOLECULAR_FIBER_ORGANIZATION|GOBP_REGULATION_OF_IMMUNE_SYSTEM_PROCESS|GOBP_REGULATION_OF_CELL_GROWTH", Set.ID)) -> df_}
+    if (celltype == "Kupffer_cells"){df_ %>% dplyr::filter(grepl("GOBP_REGULATION_OF_DEFENSE_RESPONSE|GOBP_ENDOCYTOSIS|GOBP_LEUKOCYTE_DIFFERENTIATION|GOBP_ACTIVATION_OF_IMMUNE_RESPONSE", Set.ID)) -> df_}
+    return(df_)
+  }) -> PSEA_res_list_selected
+
+generate_random_string <- function(length) {
+  # Define the characters to sample from
+  characters <- c(letters, LETTERS, 0:9)  # Lowercase, uppercase, and digits
+  
+  # Generate the random string
+  random_string <- paste(sample(characters, length, replace = TRUE), collapse = "")
+  
+  return(random_string)
+}
+
+c(3,3,3,3,7) %>% 
+  map(function(x){
+    i = x
+    1:i %>% 
+      map(function(x){
+        generate_random_string(20)
+      }) %>% unlist() -> random_string
+  }) -> random_string
+
+i = 0
+PSEA_res_list_selected %>% 
+  map2(.x=.,.y=names(.),.f=function(df_, celltype){
+    df_ = df_[,c(1,2,7,9)]
+    colnames(df_) = c("Celltype", "Set.ID", "qvalue", "phase")
+    
+    i <<- i + 1
+    data.frame(Celltype = "unknown", Set.ID = random_string[[i]], qvalue = 0, phase = 1) -> df_1
+    rbind(df_, df_1)
+  }) %>% do.call(rbind, .) %>% 
+  {
+    df_ = .
+    data.frame(Celltype = "unknown", Set.ID = random_string[[5]], qvalue = 0, phase = 1) -> df_1
+    rbind(df_, df_1)
+  } %>% 
+  dplyr::mutate(phase = round(phase)) %>% 
+  mutate(Set.ID = factor(Set.ID, levels = rev(unique(Set.ID)))) %>% 
+  ggplot(aes(x = phase, y = Set.ID, fill = qvalue)) + 
+  geom_tile() + 
+  coord_polar(theta = "x") + 
+  scale_x_continuous(limits = c(0, 24), breaks = c(2,6,10,14,18,22)) #Fig_2C ----
+
+####
+
+# 9. Hepatocytes rhythmic ATAC peaks TF motif ----
+
+library(tidyverse)
+library(Seurat)
+library(Signac)
+
+# Load in the integrated and QC'ed data
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+readRDS("~/Dropbox/singulomics/github_rda/Hepatocytes_cellnames.rds") -> hepatocytes_cells
+
+colnames(sc) %>% length()
+length(hepatocytes_cells)
+
+sc <- sc[,hepatocytes_cells]
+sc$celltype %>% table()
+
+DimPlot(sc, group.by = "ZT", label = TRUE, reduction = "multicca.umap", repel = TRUE)
+DefaultAssay(sc) <- "SCT"
+
+# Choose resolution: do not need too many metacells, especially because we need to characterize the distributions of cells within the metacells
+resolution=0.5
+sc <- FindNeighbors(object = sc, reduction = 'multicca.pca', dims = 1:50, verbose = FALSE, graph.name=c('multicca_nn','multicca_snn'))
+sc <- FindClusters(object = sc, algorithm = 1, verbose = FALSE, graph.name='multicca_snn',
+                   resolution=resolution)
+DimPlot(sc, group.by = "seurat_clusters", label = TRUE, reduction = "multicca.umap", repel = TRUE)
+sc@meta.data$seurat_clusters %>% unique() %>% length()
+
+sc=sc[,!grepl('KO',sc$group)] # Remove the knockout to look at circadian rhythmicity
+sc$group=droplevels(sc$group)
+table(sc$group)
+
+sc$ZT=as.numeric(gsub('ZT','',sc$ZT)) # Change ZT to be numeric time
+sc=sc[,sc$celltype=='Hepatocytes'] # Keep only hepatocytes
+table(sc$ZT)
+table(sc$celltype)
+
+sc$cc_cluster=NULL
+sc$cc_clusters=sc$seurat_clusters
+table(sc$cc_clusters)
+table(sc$cc_clusters, sc$group)
+dim(sc)
+
+# Minimum number of cells per timepoint in each cluster: 50
+sc=sc[,sc$cc_clusters %in% names(which(apply(table(sc$cc_clusters, sc$group), 1, min)>50))]
+sc$cc_clusters=droplevels(sc$cc_clusters)
+table(sc$cc_clusters, sc$group)
+length(table(sc$cc_clusters)) # Total number of replicates after filtering
+sc$cluster=sc$cc_clusters
+
+sc$nCount_ATAC %>% median() -> median_
+sc@meta.data$cluster %>% unique() %>% 
+  as.character() %>% 
+  as.numeric() %>% 
+  sort() %>% 
+  "names<-"(.,sprintf("cluster_%s", .)) %>% 
+  map(function(cluster_){
+    rep_ = cluster_+1
+    sc@meta.data %>% dplyr::filter(cluster == cluster_) -> df_meta
+    seq(2,22,4) %>% 
+      "names<-"(., sprintf("ZT%s", .)) %>% 
+      map(function(ZT_){
+        df_meta %>% dplyr::filter(ZT == ZT_) %>% rownames() -> cells_
+        #        head(cells_)
+        sc@assays$ATAC@counts[,cells_] -> df_
+        df_ %>% as.data.frame() %>% 
+          dplyr::mutate(across(everything(), function(x){(x/sum(x))*median_})) -> df_
+        
+        rowMeans(df_) %>% as.data.frame() %>% "colnames<-"(., sprintf("ZT%s_REP%s", ZT_, rep_)) -> df_
+      }) %>% do.call(cbind, .) -> df_
+    #    head(df_)
+  }) %>% do.call(cbind, .) -> ATAC_df
+gsub(".+\\.(.+)", "\\1", colnames(ATAC_df)) -> colnames(ATAC_df)
+
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+ATAC_df %>% 
+  {
+    df_ = .
+    gene_ = rownames(df_)
+    timepoints_ = gsub("ZT(\\d+).+", "\\1", colnames(df_)) %>% as.integer()
+    mat_ = df_ %>% as_tibble()
+    cyclic_HMP(exp_matrix = mat_, gene = gene_, timepoints = timepoints_) -> res_
+    res_
+  } -> ATAC_df_res
+
+ATAC_df_res %>% dplyr::select(matches("Gene|JTK|HR")) %>% recal_cauchy_p_and_hmp() -> ATAC_df_res
+ATAC_df_res %>% dplyr::mutate(phase = (HR_phi/(2*pi))*24) -> ATAC_df_res
+ATAC_df_res %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% dim()
+save(ATAC_df, ATAC_df_res, file = "~/Downloads/roseplot_data.rda")
+
+ATAC_df_res %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% 
+  dplyr::mutate(group = case_when(
+    (phase > 0)&(phase <= 3) ~ "ZT0-3", 
+    (phase > 3)&(phase <= 6) ~ "ZT3-6",
+    (phase > 6)&(phase <= 9) ~ "ZT6-9",
+    (phase > 9)&(phase <= 12) ~ "ZT9-12",
+    (phase > 12)&(phase <= 15) ~ "ZT12-15",
+    (phase > 15)&(phase <= 18) ~ "ZT15-18",
+    (phase > 18)&(phase <= 21) ~ "ZT18-21",
+    (phase > 21)&(phase <= 24) ~ "ZT21-24"
+  )) -> ATAC_df_res_sig
+
+DefaultAssay(sc) = "ATAC"
+ATAC_df_res_sig$group %>% 
+  unique() %>% 
+  gtools::mixedsort() %>% 
+  "names<-"(.,.) %>% 
+  #  .[1] %>% 
+  map(function(group_){
+    ATAC_df_res_sig %>% dplyr::filter(group == group_) -> df_
+    #    nrow(df_)
+    enriched.motifs = FindMotifs(object = sc, features = df_$Gene, background = ATAC_df_res$Gene) -> df_
+  }) -> enriched.TF.motifs
+
+enriched.TF.motifs %>% 
+  map(function(group_){
+    group_ %>% dplyr::mutate(motif.name = toupper(motif.name)) -> enriched.TF.motifs_
+    genes_ = sc@assays$RNA@counts %>% rownames() %>% toupper()
+    enriched.TF.motifs_ %>% dplyr::filter(motif.name %in% genes_) -> enriched.TF.motifs_
+  }) -> enriched.TF.motifs.mm10
+
+  ATAC_df_res_sig$group %>% unique() %>% 
+  gtools::mixedsort() %>% 
+  map(function(group_){
+    ATAC_df_res_sig %>% dplyr::filter(group == group_) -> df_
+    data.frame(group = group_, freq = nrow(df_))
+  }) %>% do.call(rbind, .) %>% 
+  {
+    df_ = .
+    df_$group -> levels_
+    df_$group %>% factor(levels = levels_) -> df_$group
+    df_
+  } %>% 
+  ggplot(aes(x = group, y = freq, fill = group)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(start = 0) #Fig_2F
+
 ####
