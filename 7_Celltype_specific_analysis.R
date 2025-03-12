@@ -247,6 +247,76 @@ res_ %>%
   })
 #####
 
+####Extract cell barcode within cell cluster
+library(monocle3)
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+sc@meta.data$group %>% unique()
+sc=sc[,!grepl('KO',sc$group)]
+DefaultAssay(sc) <- "SCT"
+DimPlot(sc, group.by = "predicted.id", label = T, reduction = "multicca.umap")
+sc[["UMAP"]] = sc[["multicca.umap"]]
+
+sc_1 = as.cell_data_set(sc, assay = "SCT", default.reduction = "UMAP")
+sc_1 = cluster_cells(sc_1, resolution = 1e-3)
+
+p1 <- plot_cells(sc_1, color_cells_by = "cluster", show_trajectory_graph = FALSE)
+p2 <- plot_cells(sc_1, color_cells_by = "partition", show_trajectory_graph = FALSE)
+p1|p2
+
+sc_1 <- learn_graph(sc_1, use_partition = TRUE, verbose = FALSE)
+
+plot_cells(sc_1,
+           color_cells_by = "partition",
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE)
+
+colnames(sc_1)[partitions(sc_1) == 2] -> endothelial_cell_ids
+colData(sc_1)[endothelial_cell_ids, ] %>% as.data.frame() %>%
+  filter(celltype == "Endothelial cells") %>% 
+  rownames() -> endothelial_cell_ids
+saveRDS(endothelial_cell_ids, 
+        file = "~/Dropbox/singulomics/github_rda/Endothelial_cells_cellnames.rds")
+
+colnames(sc_1)[partitions(sc_1) == 3] -> fibroblasts_ids
+colData(sc_1)[fibroblasts_ids, ] %>% as.data.frame() %>%
+  filter(celltype == "Fibroblasts") %>% 
+  rownames() -> fibroblasts_ids
+saveRDS(fibroblasts_ids, 
+        file = "~/Dropbox/singulomics/github_rda/Fibroblasts_cellnames.rds")
+
+colnames(sc_1)[partitions(sc_1) == 4] -> KC_ids
+colData(sc_1)[KC_ids, ] %>% as.data.frame() %>%
+  filter(celltype == "Kupffer cells") %>% 
+  rownames() -> KC_ids
+saveRDS(KC_ids, 
+        file = "~/Dropbox/singulomics/github_rda/Kupffer_cells_cellnames.rds")
+
+colnames(sc_1)[partitions(sc_1) == 5] -> Tcells_ids
+colData(sc_1)[Tcells_ids, ] %>% as.data.frame() %>%
+  filter(celltype == "T cells") %>% 
+  rownames() -> Tcells_ids
+saveRDS(Tcells_ids, 
+        file = "~/Dropbox/singulomics/github_rda/T_cells_cellnames.rds")
+
+colnames(sc_1)[partitions(sc_1) == 6] -> Bcells_ids
+colData(sc_1)[Bcells_ids, ] %>% as.data.frame() %>%
+  filter(celltype == "B cells") %>% 
+  rownames() -> Bcells_ids
+saveRDS(Bcells_ids, 
+        file = "~/Dropbox/singulomics/github_rda/B_cells_cellnames.rds")
+
+colnames(sc_1)[partitions(sc_1) == 7] -> Cholangiocytes_ids
+colData(sc_1)[Cholangiocytes_ids, ] %>% as.data.frame() %>%
+  filter(celltype == "Cholangiocytes") %>% 
+  rownames() -> Cholangiocytes_ids
+saveRDS(Cholangiocytes_ids, 
+        file = "~/Dropbox/singulomics/github_rda/Cholangiocytes_cellnames.rds")
+
+rm(sc_1)
+rm(list=ls())
+####
+
 # 3. Draw dotplots of RNA expression, ATAC activity and motif score ----
 ZT_min = c(ZT02 = 57, ZT06 = 33, ZT10 = 80, ZT14 = 85, ZT18 = 118, ZT22 = 121)
 
@@ -741,5 +811,5 @@ ggplotify::as.ggplot(
   pheatmap::pheatmap(mat = heatmap_mat$ATAC, cluster_rows = F, cluster_cols = F, labels_row = labels_, , color = colorRampPalette(c("#324084", "#f0e939"))(50))
 ) -> p_ATAC
 
-patchwork::wrap_plots(p_RNA, p_ATAC, ncol = 2) + patchwork::plot_annotation(title = "1997 circadian genes (Hughes et al. 2009)") #Fig_2D ----
+patchwork::wrap_plots(p_RNA, p_ATAC, ncol = 2) + patchwork::plot_annotation(title = "1997 circadian genes (Hughes et al. 2009)") #Fig_1D ----
 ####
