@@ -1715,7 +1715,11 @@ library(GenomicRanges)
 library(ggplot2)
 library(dplyr)
 
-##Check peak overlapping ----
+library(BSgenome.Mmusculus.UCSC.mm10)
+genome <- BSgenome.Mmusculus.UCSC.mm10
+full_genome <- GRanges(seqnames = seqnames(genome),
+                       ranges = IRanges(start = 1, end = seqlengths(genome)))
+
 sc@assays$ATAC@counts %>% rownames() %>% 
   {
     peaks_ = .
@@ -1725,39 +1729,272 @@ sc@assays$ATAC@counts %>% rownames() %>%
       GenomicRanges::makeGRangesFromDataFrame()
   } -> ATAC_peaks_gr
 
-levels(ATAC_peaks_gr@seqnames) -> chr_
-list.files("~/Dropbox/singulomics/github_rda/linkpeak/encode_mm10_histone_mark", pattern = "\\.bigBed", full.names = T) %>% 
-  "names<-"(., gsub("/.+/(.+)\\.bigBed", "\\1", .)) %>% 
-#  .[1] %>% 
-  map(function(bed_files){
-    gr_ = rtracklayer::import(bed_files, format = "bigBed")
-    gr_ %>% as.data.frame() %>% .$seqnames %>% {. %in% chr_} -> se_
-    gr_[se_, ] -> gr_
-  }) -> histone_mark_gr
+regions_without_peaks <- setdiff(full_genome, ATAC_peaks_gr)
 
-c(list(ATAC_peak = ATAC_peaks_gr), histone_mark_gr) %>% 
-  {
-    list_ = .
-    ChIPpeakAnno::findOverlapsOfPeaks(list_)
-  }
+library(regioneR)
+# Set parameters for random region generation
+num_regions <- 10000        # Number of random regions
+mean_length <-  876      # Mean length of each region
+sd_length <- 0          # Standard deviation of region lengths
+
+# Generate random regions
+random_regions_non_atac_peaks <- createRandomRegions(
+  nregions = num_regions,
+  length.mean = mean_length,
+  length.sd = sd_length,
+  genome = regions_without_peaks,
+  non.overlapping = TRUE
+)
+
+random_regions_genomewide <- createRandomRegions(
+  nregions = num_regions,
+  length.mean = mean_length,
+  length.sd = sd_length,
+  genome = genome,
+  non.overlapping = TRUE
+)
 
 list.files("~/Dropbox/singulomics/github_rda/linkpeak/encode_mm10_histone_mark", pattern = "\\.bigwig", full.names = T) %>% 
   "names<-"(., gsub("/.+/Encode_(.+?)_.+", "\\1", .)) %>% 
-#  .[1] %>% 
-  map2(.x = ., .y = names(.), .f=function(bigwig_, group_){
+  map(function(bigwig_){
+    print(bigwig_)
     bw <- import.bw(bigwig_)
-    data.frame(score = bw$score, width = bw@ranges@width) -> df_
-    df_ %>% dplyr::filter(score != 0) -> df_
-    set.seed(123)
-    sample(nrow(df_), 1000, replace = F) -> se
-    df_[se, ] -> df_
+    
+    levels(gene_peak_cor_df_2$linked_by) %>% 
+      "names<-"(.,.) %>% 
+      #  .[1] %>% 
+      map(function(linked_by_){
+        gene_peak_cor_df_2 %>% dplyr::filter(linked_by == linked_by_) -> df_
+        data.frame(
+          seqnames = gsub("(.+)-(.+)-(.+)", "\\1", df_$peak), 
+          start = gsub("(.+)-(.+)-(.+)", "\\2", df_$peak) %>% as.numeric(), 
+          end = gsub("(.+)-(.+)-(.+)", "\\3", df_$peak) %>% as.numeric()
+        ) %>% GenomicRanges::makeGRangesFromDataFrame() -> peak_gr
+        GenomicRanges::findOverlaps(peak_gr, bw) -> overlaps
+        
+        bw[subjectHits(overlaps)]@ranges@width -> bw_width
+        peak_gr[queryHits(overlaps)]@ranges@width -> peak_width
+        width_ <- pintersect(peak_gr[queryHits(overlaps)], bw[subjectHits(overlaps)])@ranges@width
+        
+        signal_values <- mcols(bw)$score[subjectHits(overlaps)]
+        peaks_signal <- data.frame(
+          peak_id = queryHits(overlaps),
+          signal = signal_values,
+          overlapping_width = width_,
+          bw_width = bw_width, 
+          peak_width = peak_width
+        )
+        
+        mean_signal <- peaks_signal %>%
+          group_by(peak_id) %>%
+          group_by(peak_id, peak_width) %>% 
+          group_map(function(x,y){
+            df_ = x
+            df_ %>% dplyr::mutate(norm_signal = (signal*overlapping_width)) -> df_
+            normalized_signal = sum(df_$norm_signal)/df_$peak_width[1]
+            data.frame(peak_id = y, mean_signal = normalized_signal)
+          }, .keep = T) %>% do.call(rbind, .)
+        
+      }) -> mean_signal_list
+    
+    c("Random_peaks") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        sc@assays$ATAC@counts %>% rownames() -> peaks_
+        set.seed(123)
+        sample(x = peaks_, size = 10000, replace = F) -> random_peaks_
+        data.frame(
+          seqnames = gsub("(.+)-(.+)-(.+)", "\\1", random_peaks_), 
+          start = gsub("(.+)-(.+)-(.+)", "\\2", random_peaks_) %>% as.numeric(), 
+          end = gsub("(.+)-(.+)-(.+)", "\\3", random_peaks_) %>% as.numeric()
+        ) %>% GenomicRanges::makeGRangesFromDataFrame() -> peak_gr
+        GenomicRanges::findOverlaps(peak_gr, bw) -> overlaps
+        
+        bw[subjectHits(overlaps)]@ranges@width -> bw_width
+        peak_gr[queryHits(overlaps)]@ranges@width -> peak_width
+        width_ <- pintersect(peak_gr[queryHits(overlaps)], bw[subjectHits(overlaps)])@ranges@width
+        
+        signal_values <- mcols(bw)$score[subjectHits(overlaps)]
+        peaks_signal <- data.frame(
+          peak_id = queryHits(overlaps),
+          signal = signal_values,
+          overlapping_width = width_,
+          bw_width = bw_width, 
+          peak_width = peak_width
+        )
+        
+        mean_signal <- peaks_signal %>%
+          group_by(peak_id) %>%
+          group_by(peak_id, peak_width) %>% 
+          group_map(function(x,y){
+            df_ = x
+            df_ %>% dplyr::mutate(norm_signal = (signal*overlapping_width)) -> df_
+            normalized_signal = sum(df_$norm_signal)/df_$peak_width[1]
+            data.frame(peak_id = y, mean_signal = normalized_signal)
+          }, .keep = T) %>% do.call(rbind, .)
+        
+      }) -> random_mean_signal_list
+    
+    c("Random_region_genomewide") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        random_regions_genomewide -> peak_gr
+        GenomicRanges::findOverlaps(peak_gr, bw) -> overlaps
+        
+        bw[subjectHits(overlaps)]@ranges@width -> bw_width
+        peak_gr[queryHits(overlaps)]@ranges@width -> peak_width
+        width_ <- pintersect(peak_gr[queryHits(overlaps)], bw[subjectHits(overlaps)])@ranges@width
+        
+        signal_values <- mcols(bw)$score[subjectHits(overlaps)]
+        peaks_signal <- data.frame(
+          peak_id = queryHits(overlaps),
+          signal = signal_values,
+          overlapping_width = width_,
+          bw_width = bw_width, 
+          peak_width = peak_width
+        )
+        
+        mean_signal <- peaks_signal %>%
+          group_by(peak_id) %>%
+          group_by(peak_id, peak_width) %>% 
+          group_map(function(x,y){
+            df_ = x
+            df_ %>% dplyr::mutate(norm_signal = (signal*overlapping_width)) -> df_
+            normalized_signal = sum(df_$norm_signal)/df_$peak_width[1]
+            data.frame(peak_id = y, mean_signal = normalized_signal)
+          }, .keep = T) %>% do.call(rbind, .)
+        
+      }) -> random_regions_genomewide_list
+    
+    c("Random_region_non_atac_peaks") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        random_regions_non_atac_peaks -> peak_gr
+        GenomicRanges::findOverlaps(peak_gr, bw) -> overlaps
+        
+        bw[subjectHits(overlaps)]@ranges@width -> bw_width
+        peak_gr[queryHits(overlaps)]@ranges@width -> peak_width
+        width_ <- pintersect(peak_gr[queryHits(overlaps)], bw[subjectHits(overlaps)])@ranges@width
+        
+        signal_values <- mcols(bw)$score[subjectHits(overlaps)]
+        peaks_signal <- data.frame(
+          peak_id = queryHits(overlaps),
+          signal = signal_values,
+          overlapping_width = width_,
+          bw_width = bw_width, 
+          peak_width = peak_width
+        )
+        
+        mean_signal <- peaks_signal %>%
+          group_by(peak_id) %>%
+          group_by(peak_id, peak_width) %>% 
+          group_map(function(x,y){
+            df_ = x
+            df_ %>% dplyr::mutate(norm_signal = (signal*overlapping_width)) -> df_
+            normalized_signal = sum(df_$norm_signal)/df_$peak_width[1]
+            data.frame(peak_id = y, mean_signal = normalized_signal)
+          }, .keep = T) %>% do.call(rbind, .)
+        
+      }) -> random_regions_non_atac_peaks_list
+    
+    
+    c(mean_signal_list, random_mean_signal_list, random_regions_genomewide_list, random_regions_non_atac_peaks_list) -> mean_signal_list_1
+    names(mean_signal_list_1)
+    
+    mean_signal_list_1 %>% 
+      map2(.x=.,.y=names(.),.f=function(df_, linked_by){
+        df_ %>% dplyr::mutate(linked_by = linked_by) %>% 
+          dplyr::select(linked_by, mean_signal)
+      }) %>% do.call(rbind, .) -> df_bw_signal
+    
     gc()
-    df_ %>% ggplot(aes(x = width, y = score)) + geom_point() + ggtitle(group_) + theme_classic()
-  }) -> histone_mark_width
-patchwork::wrap_plots(histone_mark_width, ncol = 3)
+    return(df_bw_signal)
+    
+  }) -> df_bw_signal_list
+gc()
 
-library(BSgenome.Mmusculus.UCSC.mm10)
-genome <- BSgenome.Mmusculus.UCSC.mm10
-full_genome <- GRanges(seqnames = seqnames(genome),
-                       ranges = IRanges(start = 1, end = seqlengths(genome)))
-regions_without_peaks <- setdiff(full_genome, ATAC_peaks_gr)
+df_bw_signal_list %>% 
+  map(function(df_){
+    df_ %>% dplyr::mutate(linked_by = case_when(
+      linked_by == "Random_peaks" ~ "Random peaks\n(ATAC)",
+      linked_by == "Random_region_genomewide" ~ "Random region\n(Genomewide)",
+      linked_by == "Random_region_non_atac_peaks" ~ "Random region\n(non ATAC peaks)",
+      TRUE ~ linked_by
+    ))
+  }) -> df_bw_signal_list
+
+df_bw_signal_list %>% 
+  map(function(df_){
+    levels(factor(df_$linked_by)) %>% .[c(2,3,1,4,5,6)] -> levels_
+    df_ %>% dplyr::mutate(linked_by = factor(linked_by, levels = levels_)) -> df_
+  }) -> df_bw_signal_list
+
+df_bw_signal_list %>% 
+  map(function(df_){
+    levels(df_$linked_by)[c(1,4:6)] -> levels_
+    df_ %>% dplyr::filter(linked_by %in% levels_) -> df_
+    factor(df_$linked_by, levels = levels_) -> df_$linked_by
+    return(df_)
+  }) -> df_bw_signal_list
+
+list(
+  H3K9ac = df_bw_signal_list$H3K9ac %>% 
+    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+    geom_boxplot() + 
+#    scale_y_break(breaks = c(4,20), scales = 0.5) + 
+    scale_y_break(breaks = c(3,20), scales = 0.5) + 
+    theme_classic() + 
+    ylab("H3K9ac signal") + 
+    theme(legend.position = "none") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+    xlab(NULL),
+  
+  H3K27ac = df_bw_signal_list$H3K27ac %>% 
+    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+    geom_boxplot() + 
+#    scale_y_break(breaks = c(7,20), scales = 0.5) + 
+    scale_y_break(breaks = c(6,10), scales = 0.5) + 
+    theme_classic() + 
+    ylab("H3K27ac signal") + 
+    theme(legend.position = "none") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+    xlab(NULL),
+  
+  H3K4me1 = df_bw_signal_list$H3K4me1 %>% 
+    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+    geom_boxplot() + 
+#    scale_y_break(breaks = c(4,20), scales = 0.5) + 
+#    scale_y_break(breaks = c(3,6), scales = 0.5) + 
+    scale_y_break(breaks = c(2.5,6), scales = 0.5) + 
+    theme_classic() + 
+    ylab("H3K4me1 signal") + 
+    theme(legend.position = "none") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+    xlab(NULL),
+  
+  H3K4me3 = df_bw_signal_list$H3K4me3 %>% 
+    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+    geom_boxplot() + 
+#    scale_y_break(breaks = c(6,20), scales = 0.5) + 
+    scale_y_break(breaks = c(4.5,20), scales = 0.5) + 
+    theme_classic() + 
+    ylab("H3K4me3 signal") + 
+    theme(legend.position = "none") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+    xlab(NULL),
+  
+  H3K27me3 = df_bw_signal_list$H3K27me3 %>% 
+    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+    geom_boxplot() + 
+#    scale_y_break(breaks = c(4,20), scales = 0.5) + 
+    scale_y_break(breaks = c(1,5), scales = 0.5) + 
+#    scale_y_break(breaks = c(0.25,2), scales = 0.5) + 
+    theme_classic() + 
+    ylab("H3K27me3 signal")+
+    theme(legend.position = "none") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+    xlab(NULL)
+) -> p_histone_mark
+
+p_histone_mark$H3K27ac+p_histone_mark$H3K4me1 # Fig 4I
+####
