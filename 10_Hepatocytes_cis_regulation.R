@@ -1007,7 +1007,7 @@ save(PRJDB7796_peak_list, file = "~/Dropbox/singulomics/github_rda/TRIPOD/PRJDB7
 read.table("~/Dropbox/singulomics/github_rda/TRIPOD/GSE39977/mapping.txt", header = F, sep = "\t", stringsAsFactors = F) %>% 
   "colnames<-"(., c("GSM", "sample")) -> mapping_df
 
- ####macs2 peak calling ----
+ ####macs2 peak calling
 mapping_df %>% mutate(group = gsub("Sample \\d+_(.+)", "\\1", sample)) %>% 
   filter(grepl("BMAL1|CLOCK|NPAS2", group)) %>% 
   mutate(group = gsub("Input DNA for ", "", group)) %>% 
@@ -1237,3 +1237,1337 @@ c(names(ChIP_peak_list), "Others") %>%
 save(trios_res_df_2, file = "~/Downloads/trios_res_df_2.RData")
 trios_res_df_2 %>% as.data.frame() -> trios_res_df_2
 ####
+
+# 4. TRIPOD results (downstream analysis) ----
+library(Seurat)
+library(Signac)
+library(tidyverse)
+
+load("~/Dropbox/singulomics/github_rda/TRIPOD/GSE155161_CHI-C_annotated.rda")
+load("~/Dropbox/singulomics/github_rda/TRIPOD/GSE39977/GSE39977_ChIP_timepoint_mat.rda")
+load("~/Downloads/trios_res_df_2.RData")
+trios_res_df_2 %>% as.data.frame() -> trios_res_df_2
+trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD", (CHI_C_validate==TRUE|ChIP_seq_validated==TRUE)) %>% 
+  dplyr::select(-c(peak_num, TF_num, model_1, peak_name, regulation, gtf_annotation, gtf_gene, CHI_C_gene)) %>% 
+  {write.csv(., file="~/Downloads/trios_res_df_2.csv", row.names = F, quote = F)}
+
+#load(file='~/Dropbox/singulomics/github_rda/TRIPOD/list_trios_res.rda')
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/metacell.rna.rda')
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/metacell.peak.rda')
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/sc.rda')
+load('~/Dropbox/singulomics/github_rda/TRIPOD/list_circadian_pval.rda')
+
+
+readRDS(file="~/Dropbox/singulomics/github_rda/gene.ref.rds") -> gene.ref
+gene.ref %>% as.data.frame() -> gene.ref
+
+sc@meta.data[,c("ZT", "seurat_clusters")] %>% distinct() %>% dplyr::arrange(seurat_clusters) %>% 
+  mutate(metacell = sprintf("metacell_%s", seurat_clusters)) %>% 
+  "rownames<-"(., 1:nrow(.)) -> metacell_ZT
+rm(sc)
+
+Core_clock_genes = c("Dbp", "Arntl", "Bhlhe40", "Bhlhe41", "Nfil3", "Rorc", "Rora", "Nr1d1", "Clock", "Npas2", "Cry1", "Ciart", "Per1", "Per2")
+PlotGenePeakTF_custom = function(gene, TF, peak, peak_name = NULL){
+  
+  unique(metacell_ZT$ZT) %>% 
+    as.character() %>% 
+    "names<-"(.,.) %>% 
+    map(function(x){
+      ZT_ = x
+      metacell_ZT %>% dplyr::filter(ZT == ZT_) %>% .$metacell -> metacell_
+      metacell.rna[metacell_, gene] %>% 
+        as.data.frame() %>% 
+        "colnames<-"(.,"gene_expression") %>% 
+        mutate(ZT = ZT_)
+    }) %>% do.call(rbind, .) %>% 
+    mutate(ZT = factor(ZT)) %>% 
+    ggplot(aes(x = ZT, y = gene_expression, fill = ZT)) + 
+    geom_boxplot() -> p1
+  p1 + theme_classic() + 
+    theme(legend.position = "none") + 
+    xlab(NULL) -> p1
+  padj_ = list_pval[["rna"]] %>% dplyr::filter(Gene == gene) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
+  p1 + ggtitle(sprintf("Target gene: %s\np.adj: %s", gene, padj_)) -> p1
+  
+  unique(metacell_ZT$ZT) %>% 
+    as.character() %>% 
+    "names<-"(.,.) %>% 
+    map(function(x){
+      ZT_ = x
+      metacell_ZT %>% dplyr::filter(ZT == ZT_) %>% .$metacell -> metacell_
+      metacell.peak[metacell_, peak] %>% 
+        as.data.frame() %>% 
+        "colnames<-"(.,"peak_accessibility") %>% 
+        mutate(ZT = ZT_)
+    }) %>% do.call(rbind, .) %>% 
+    mutate(ZT = factor(ZT)) %>% 
+    ggplot(aes(x = ZT, y = peak_accessibility, fill = ZT)) + 
+    geom_boxplot() -> p2
+  p2 + theme_classic() + 
+    theme(legend.position = "none") + 
+    xlab(NULL) -> p2
+  padj_ = list_pval[["peak"]] %>% dplyr::filter(Gene == peak) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
+  if (is.null(peak_name)){
+    p2 + ggtitle(sprintf("CRE: %s\np.adj: %s", peak, padj_)) -> p2    
+  }else{
+    p2 + ggtitle(sprintf("%s: %s\np.adj: %s", peak_name, peak, padj_)) -> p2    
+  }
+  
+  
+  unique(metacell_ZT$ZT) %>% 
+    as.character() %>% 
+    "names<-"(.,.) %>% 
+    map(function(x){
+      ZT_ = x
+      metacell_ZT %>% dplyr::filter(ZT == ZT_) %>% .$metacell -> metacell_
+      metacell.rna[metacell_, TF] %>% 
+        as.data.frame() %>% 
+        "colnames<-"(.,"gene_expression") %>% 
+        mutate(ZT = ZT_)
+    }) %>% do.call(rbind, .) %>% 
+    mutate(ZT = factor(ZT)) %>% 
+    ggplot(aes(x = ZT, y = gene_expression, fill = ZT)) + 
+    geom_boxplot() -> p3
+  
+  p3 + theme_classic() + 
+    theme(legend.position = "none") + 
+    xlab(NULL) -> p3
+  padj_ = list_pval[["rna"]] %>% dplyr::filter(Gene == TF) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
+  p3 + ggtitle(sprintf("TF: %s\np.adj: %s", TF, padj_)) -> p3
+  
+  patchwork::wrap_plots(p1, p2, p3, ncol = 3)
+}
+PlotGenePeakTF_custom_1 = function(plot){
+  p = plot
+  gene_df = p[[1]]$data
+  gene_df %>% 
+    dplyr::mutate(ZT = gsub("ZT(\\d+)", "\\1", ZT) %>% as.integer()) %>% 
+    mutate(group = "target_gene") -> gene_df
+  p[[1]]$label$title %>% gsub(".+?: (.+)\n.+", "\\1", .) -> target_gene
+  
+  TF_df = p[[3]]$data
+  TF_df %>% 
+    dplyr::mutate(ZT = gsub("ZT(\\d+)", "\\1", ZT) %>% as.integer()) %>% 
+    mutate(group = "TF") -> TF_df
+  p[[3]]$label$title %>% gsub(".+?: (.+)\n.+", "\\1", .) -> TF
+  
+  #    c(gene_df$gene_expression, TF_df$gene_expression) %>% max() -> gene_max
+  
+  peak_df = p[[2]]$data
+  peak_df %>% 
+    dplyr::mutate(ZT = gsub("ZT(\\d+)", "\\1", ZT) %>% as.integer()) %>% 
+    mutate(group = "peak") %>% 
+    "colnames<-"(.,c("gene_expression", "ZT", "group")) -> peak_df
+  p[[2]]$label$title %>% gsub(".+?: (.+)\n.+", "\\1", .) -> peak
+  
+  #    peak_df$gene_expression %>% max() -> peak_max
+  #    scale_factor = gene_max/peak_max
+  #    
+  rbind(gene_df, TF_df, peak_df) -> df_
+  df_ %>% 
+    group_by(group, ZT) %>% 
+    group_map(function(x,y){
+      measure = x$gene_expression %>% mean()
+      sd = x$gene_expression %>% sd()
+      data.frame(group = y$group, ZT = y$ZT, measure = measure, sd = sd) -> df_
+      
+      return(df_)
+    }) %>% do.call(rbind, .) -> df_
+  gene_max = df_ %>% dplyr::filter(group != "peak") %>% .$measure %>% max()
+  peak_max = df_ %>% dplyr::filter(group == "peak") %>% .$measure %>% max()
+  scale_factor = gene_max/peak_max
+  df_ %>% 
+    mutate(measure = ifelse(group == "peak", measure*scale_factor, measure)) %>% 
+    mutate(sd = ifelse(group == "peak", sd*scale_factor, sd)) -> df_
+  
+  df_ %>% 
+#    ggplot(aes(x = ZT, y = measure, color = group, group = group, linetype = group)) + 
+    ggplot(aes(x = ZT, y = measure, color = group, group = group)) + 
+    geom_line() + 
+    scale_linetype_manual(values = c("target_gene" = "solid", "TF" = "solid", "peak" = "dashed")) + 
+    geom_ribbon(aes(ymin = measure - sd, ymax = measure + sd, fill = group), alpha = 0.2, color = NA) + 
+    scale_y_continuous(name="Mean gene expression", sec.axis=sec_axis(~./scale_factor, name="Mean peak accessibility")) + 
+    scale_x_continuous(breaks = seq(2, 22, 4)) + 
+    ggtitle(sprintf("TF: %s\nTarget gene: %s\nCRE: %s", TF, target_gene, peak)) -> p
+  return(p)
+}
+PlotGenePeakTF_custom_2 = function(plot){
+  plot$data -> dat_
+  plot$labels$title -> title_
+  
+  TF_ = gsub("TF: (.+?)\n.+", "\\1", title_)
+  gene_ = gsub("TF: (.+?)\nTarget gene: (.+?)\nCRE: (.+)", "\\2", title_)
+  CRE_ = gsub("TF: (.+?)\nTarget gene: (.+?)\nCRE: (.+)\n.+", "\\3", title_)
+  validation_ = gsub("TF: (.+?)\nTarget gene: (.+?)\nCRE: (.+)\nValidation: (.+)", "\\4", title_)
+#  sprintf("TF=%s, Target gene=%s, CRE=%s", TF_, gene_, CRE_) %>% print()
+  
+  if (TF_ == "Arntl"){
+    TF__ = "Bmal1"
+  }else{
+    TF__  = TF_
+  }
+  
+#  GSE39977_ChIP_timepoint_mat$multiple[[sprintf("%s_ChIP", TF__)]] %>% 
+#  GSE39977_ChIP_timepoint_mat$unique[[sprintf("%s_ChIP", TF__)]] %>% 
+  GSE39977_ChIP_timepoint_mat_1[[sprintf("%s_ChIP", TF__)]] %>%
+    dplyr::mutate(across(matches("CT|Input"), function(x){(x/sum(x))*1e6})) %>% 
+    dplyr::filter(Peaks == CRE_) %>% 
+    dplyr::select(-Input) %>% 
+    pivot_longer(-Peaks, names_to = "ZT", values_to = "measure") %>% 
+    dplyr::mutate(ZT = gsub("CT(\\d+)", "\\1", ZT) %>% as.integer()) %>% 
+    dplyr::mutate(sd = 0, group = "ChIP") %>% 
+    dplyr::select(group, ZT, measure, sd) -> ChIP_df
+#  print(ChIP_df)
+  rbind(dat_, ChIP_df) -> dat_
+#  print(dat_)
+  
+  gene_max = dat_ %>% dplyr::filter(group != "peak|ChIP") %>% .$measure %>% max()
+  ChIP_max = dat_ %>% dplyr::filter(group == "ChIP") %>% .$measure %>% max()
+  scale_factor = gene_max/ChIP_max
+  
+  dat_ %>% dplyr::mutate(measure = case_when(
+    group == "ChIP" ~ measure*scale_factor,
+    TRUE ~ measure
+  )) -> dat_
+
+  
+  dat_$group = factor(dat_$group, levels = c("peak", "target_gene", "TF", "ChIP"))
+  
+  dat_ %>% 
+    ggplot(aes(x = ZT, y = measure, color = group, group = group, linetype = group)) + 
+    geom_line() + 
+    scale_linetype_manual(values = c("target_gene" = "solid", "TF" = "solid", "peak" = "dashed", "ChIP" = "dashed")) + 
+    geom_ribbon(aes(ymin = measure - sd, ymax = measure + sd, fill = group), alpha = 0.2, color = NA) + 
+    scale_y_continuous(name="Gene/TF expression", sec.axis=sec_axis(~./scale_factor, name="ATAC peak accessibility/ChIP counts")) + 
+    scale_x_continuous(breaks = seq(2, 22, 4)) + 
+    scale_color_manual(values = c("peak" = "#F8766D", "TF" = "#619CFF", "target_gene" = "#00BA38", "ChIP" = "#BC2CFF")) + 
+    scale_fill_manual(values = c("peak" = "#F8766D", "TF" = "#619CFF", "target_gene" = "#00BA38", "ChIP" = "#BC2CFF")) + 
+    ggtitle(sprintf("TF: %s\nTarget gene: %s\nATAC/ChIP peak: %s\nValidation: %s", TF_, gene_, CRE_, validation_)) -> p
+  return(p)
+}
+PlotGenePeakTF_custom_3 = function(gene_, peak_, plot_){
+  GSE155161_annotated_CHI_C %>% dplyr::filter(gene == gene_) -> df_
+  data.frame(seqnames = gsub("(.+):.+:.+", "\\1", df_$CRE), 
+             start = gsub("(.+):(.+):.+", "\\2", df_$CRE) %>% as.integer(), 
+             end = gsub("(.+):(.+):(.+)", "\\3", df_$CRE) %>% as.integer(), 
+             ZT = df_$ZT, 
+             score = df_$score) -> df_
+  
+  data.frame(seqnames = gsub("(.+)-.+-.+", "\\1", peak_), 
+             start = gsub("(.+)-(.+)-.+", "\\2", peak_) %>% as.integer(),
+             end = gsub("(.+)-(.+)-(.+)", "\\3", peak_) %>% as.integer()) %>% 
+    GenomicRanges::makeGRangesFromDataFrame(.) -> peak_gr
+  
+  df_$ZT %>% unique() %>% 
+    gtools::mixedsort() %>% 
+    "names<-"(.,.) %>% 
+    map(function(x){
+      ZT_ = x
+      df_ %>% dplyr::filter(ZT == ZT_) -> df_
+      GenomicRanges::makeGRangesFromDataFrame(df_, keep.extra.columns = T) -> CHI_C_gr
+      ChIPpeakAnno::findOverlapsOfPeaks(peak_gr, CHI_C_gr, maxgap = 1000) -> ol
+      ol$overlappingPeaks[[1]] -> ol
+      ol$score %>% sum() -> interaction_score
+      data.frame(group = "CHI_C", ZT = gsub("ZT(\\d+)", "\\1", ZT_) %>% as.integer(), measure = interaction_score, sd = 0)
+#      data.frame(group_ = "CHI_C", ZT_ = gsub("ZT(\\d+)", "\\1", ZT_) %>% as.integer(), measure_ = interaction_score)
+    }) %>% do.call(rbind, .) -> CHI_C_dat
+  
+#  scale_factor = max(plot_$data$measure)/max(CHI_C_dat$measure)
+  CHI_C_dat$measure = scales::rescale(CHI_C_dat$measure, to = c(min(plot_$data$measure), max(plot_$data$measure)))
+  plot_ + 
+#    geom_line(data = CHI_C_dat, aes(x = ZT, y = measure, group = group), inherit.aes = F) -> p
+    geom_point(data = CHI_C_dat, aes(x = ZT, y = measure, group = group), inherit.aes = F, shape = 8) -> p
+  return(p)
+
+#  return(ol)
+#  return(peak_gr)
+#  return(CHI_C_gr)
+}
+Plot_ChIP = function(TF, Peak){
+  GSE39977_ChIP_timepoint_mat$multiple[[sprintf("%s_ChIP", TF)]] %>% 
+    dplyr::mutate(across(matches("CT|Input"), function(x){(x/sum(x))*10^6})) %>% 
+    dplyr::filter(Peaks == Peak) %>% 
+    pivot_longer(cols = -Peaks, names_to = "ZT", values_to = "measure") %>% 
+    dplyr::filter(ZT != "Input") %>%
+    dplyr::mutate(ZT = gsub("CT(\\d+)", "\\1", ZT) %>% as.integer()) -> df_
+  df_ %>% 
+    ggplot(aes(x = ZT, y = measure)) + 
+    geom_line() -> p
+  return(p)
+}
+Plot_CHI_C = function(target_gene, Peak){
+  GSE155161_annotated_CHI_C %>% dplyr::filter(gene == target_gene) -> df_
+  data.frame(seqnames = gsub("(.+):.+:.+", "\\1", df_$CRE), 
+             start = gsub("(.+):(.+):.+", "\\2", df_$CRE) %>% as.integer(), 
+             end = gsub("(.+):(.+):(.+)", "\\3", df_$CRE) %>% as.integer(), 
+             ZT = df_$ZT, 
+             score = df_$score) -> df_
+  
+  data.frame(seqnames = gsub("(.+)-.+-.+", "\\1", Peak), 
+             start = gsub("(.+)-(.+)-.+", "\\2", Peak) %>% as.integer(),
+             end = gsub("(.+)-(.+)-(.+)", "\\3", Peak) %>% as.integer()) %>% 
+    GenomicRanges::makeGRangesFromDataFrame(.) -> peak_gr
+  
+  df_$ZT %>% unique() %>% 
+    gtools::mixedsort() %>% 
+    "names<-"(.,.) %>% 
+    map(function(x){
+      ZT_ = x
+      df_ %>% dplyr::filter(ZT == ZT_) -> df_
+      GenomicRanges::makeGRangesFromDataFrame(df_, keep.extra.columns = T) -> CHI_C_gr
+      ChIPpeakAnno::findOverlapsOfPeaks(peak_gr, CHI_C_gr, maxgap = 1000) -> ol
+      ol$overlappingPeaks[[1]] -> ol
+      ol$score %>% sum() -> interaction_score
+      data.frame(Peaks = Peak, ZT = gsub("ZT(\\d+)", "\\1", ZT_) %>% as.integer(), measure = interaction_score)
+#      data.frame(group = "CHI_C", ZT = gsub("ZT(\\d+)", "\\1", ZT_) %>% as.integer(), measure = interaction_score)
+      #      data.frame(group_ = "CHI_C", ZT_ = gsub("ZT(\\d+)", "\\1", ZT_) %>% as.integer(), measure_ = interaction_score)
+    }) %>% do.call(rbind, .) -> CHI_C_dat
+  
+  CHI_C_dat %>% 
+    ggplot(aes(x = ZT, y = measure)) + 
+    geom_line() -> p
+  return(p)
+}
+combine_ChIP_CHI_C = function(ChIP_plot, CHI_C_plot){
+  ChIP_plot$data %>% 
+    dplyr::mutate(group = "ChIP") -> ChIP_plot$data
+  ChIP_max = max(ChIP_plot$data$measure)
+  CHI_C_plot$data %>% 
+    dplyr::mutate(group = "CHI_C") -> CHI_C_plot$data
+  CHI_C_max = max(CHI_C_plot$data$measure)
+  rbind(ChIP_plot$data, CHI_C_plot$data) -> df_
+  
+  scale_factor = ChIP_max/CHI_C_max
+  df_ %>% dplyr::mutate(measure = case_when(
+    group == "CHI_C" ~ measure*scale_factor,
+    TRUE ~ measure
+  )) -> df_
+  
+#  return(df_)
+  ggplot(df_, aes(x = ZT, y = measure, color = group)) + 
+    geom_line() -> p
+  p + scale_y_continuous(name = "TF ChIP signal", sec.axis = sec_axis(~./scale_factor, name = "CHI-C interaction")) -> p
+  return(p)
+}
+
+trios_res_df_2
+
+trios_res_df_2 %>% 
+  dplyr::filter(model_1 == "TRIPOD", TF %in% Core_clock_genes, gene %in% Core_clock_genes) %>% 
+  dplyr::filter((CHI_C_validate == "TRUE")|(ChIP_seq_validated == "TRUE")) %>% 
+  dplyr::arrange(TF) %>% 
+  {
+    df_ = .
+    df_[,c("gene", "peak", "TF", "CHI_C_validate", "ChIP_seq_validated")] %>% distinct() -> df_
+    df_ %>% dplyr::mutate(validation = case_when(
+      (CHI_C_validate == "TRUE")&(ChIP_seq_validated != "TRUE") ~ "CHI_C",
+      (ChIP_seq_validated == "TRUE")&(CHI_C_validate != "TRUE") ~ "ChIP-seq",
+      (ChIP_seq_validated == "TRUE")&(CHI_C_validate == "TRUE") ~ "Both"
+    )) -> df_
+    df_$TF %>% 
+      unique() %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        TF_ = x
+        df_ %>% dplyr::filter(TF == TF_) -> df_
+        1:nrow(df_) %>% 
+          map(function(i){
+            df_[i, ] -> df_
+            PlotGenePeakTF_custom(gene = df_$gene, TF = df_$TF, peak = df_$peak) -> p
+            PlotGenePeakTF_custom_1(p) -> p
+            p + ggtitle(sprintf("TF: %s\nTarget gene: %s\nCRE: %s\nValidation: %s", df_$TF, df_$gene, df_$peak, df_$validation)) -> p
+            return(p)
+          }) -> p_list
+      }) -> p_list
+    p_list
+  } -> p_list
+
+
+patchwork::wrap_plots(p_list$Arntl[[1]], p_list$Clock[[1]], p_list$Npas2[[7]], p_list$Rorc[[3]], ncol = 2, guides = "collect") # Fig 4B
+
+#add motif score to the plot
+library(Seurat)
+library(Signac)
+library(tidyverse)
+
+load("~/Downloads/trios_res_df_2.RData")
+trios_res_df_2 %>% as.data.frame() -> trios_res_df_2
+trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD") %>% .$TF %>% unique() %>% toupper() -> TRIPOD_TF_
+
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/metacell.rna.rda')
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/metacell.peak.rda')
+
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/sc.rda')
+sc@meta.data[,c("ZT", "seurat_clusters")] %>% distinct() %>% dplyr::arrange(seurat_clusters) %>% 
+  mutate(metacell = sprintf("metacell_%s", seurat_clusters)) %>% 
+  "rownames<-"(., 1:nrow(.)) -> metacell_ZT
+metacell_ZT %>% dplyr::mutate(col_ = sprintf("%s_%s", ZT, metacell)) -> metacell_ZT
+
+sc@assays$ATAC@motifs@motif.names %>% unlist() %>% toupper() -> TF_motif
+colnames(metacell.rna) %>% toupper() -> RNA_genes
+setdiff(TF_motif, RNA_genes)
+intersect(TF_motif, RNA_genes) -> TF_
+length(TF_)
+
+TF_expr = metacell.rna %>% "colnames<-"(., toupper(colnames(.))) %>% .[,TF_]
+rownames(TF_expr) = metacell_ZT$col_
+TF_expr %>% t() %>% as.data.frame() -> TF_expr
+TF_expr %>% dplyr::mutate(TRIPOD = case_when(rownames(.) %in% TRIPOD_TF_ ~ "yes", TRUE ~ "no")) -> TF_expr
+dim(TF_expr)
+
+metacell.peak %>% t() %>% as.data.frame() %>% "colnames<-"(., metacell_ZT$col_) -> CRE_expr
+trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD") %>% .$peak %>% unique() -> TRIPOD_CRE_
+CRE_expr %>% dplyr::mutate(TRIPOD = case_when(rownames(.) %in% TRIPOD_CRE_ ~ "yes", TRUE ~ "no")) -> CRE_expr
+
+gene_expr = metacell.rna %>% "colnames<-"(., toupper(colnames(.)))
+rownames(gene_expr) = metacell_ZT$col_
+gene_expr %>% t() %>% as.data.frame() -> gene_expr
+trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD") %>% .$gene %>% unique() %>% toupper() -> TRIPOD_gene_
+gene_expr %>% dplyr::mutate(TRIPOD = case_when(rownames(.) %in% TRIPOD_gene_ ~ "yes", TRUE ~ "no")) -> gene_expr
+
+
+sc@meta.data -> sc_meta_
+rm(sc);gc()
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+sc@assays$MOTIF@data -> motif_expr
+motif_expr[,rownames(sc_meta_)] -> motif_expr
+rownames(motif_expr) -> motif_names
+sc@assays$ATAC@motifs@motif.names[motif_names] %>% unlist() %>% unname() %>% toupper() -> rownames(motif_expr)
+sc_meta_ %>% 
+  rownames_to_column("cells") %>% 
+  group_by(seurat_clusters) %>% 
+  group_map(function(meta_, cluster_){
+    meta_$cells -> cells_
+#    motif_expr[,cells_][1:5,1:5] %>% 
+    motif_expr[,cells_] %>% 
+      rowMeans() %>% 
+      as.data.frame() %>% "colnames<-"(., sprintf("cluster_%s", cluster_$seurat_clusters)) -> df_
+  }, .keep = T) %>% do.call(cbind, .) -> motif_expr
+colnames(motif_expr) <- metacell_ZT$col_
+dim(motif_expr)
+
+trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD") %>% .$TF %>% unique() %>% toupper() -> TRIPOD_MOTIF_
+motif_expr %>% dplyr::mutate(TRIPOD = case_when(rownames(.) %in% TRIPOD_MOTIF_ ~ "yes", TRUE ~ "no")) -> motif_expr
+
+dim(TF_expr)
+dim(gene_expr)
+dim(CRE_expr)
+dim(motif_expr)
+
+write.csv(TF_expr, file = "~/Dropbox/singulomics/github_rda/TRIPOD/bayesian/TF_expression.csv", col.names = T, row.names = T, quote = F)
+write.csv(gene_expr, file = "~/Dropbox/singulomics/github_rda/TRIPOD/bayesian/gene_expression.csv", col.names = T, row.names = T, quote = F)
+write.csv(CRE_expr, file = "~/Dropbox/singulomics/github_rda/TRIPOD/bayesian/CRE_expression.csv", col.names = T, row.names = T, quote = F)
+write.csv(motif_expr, file = "~/Dropbox/singulomics/github_rda/TRIPOD/bayesian/motif_expression.csv", col.names = T, row.names = T, quote = F)
+###
+
+read.csv("~/Dropbox/singulomics/github_rda/TRIPOD/bayesian/motif_expression.csv", row.names = 1, header = T, stringsAsFactors = F, sep = ",") -> motif_expr
+list(ARNTL = p_list$Arntl[[1]], CLOCK = p_list$Clock[[1]], 
+     RORC = p_list$Rorc[[6]], RORC = p_list$Rorc[[1]], 
+     ARNTL = p_list$Arntl[[2]]) %>% 
+  map2(.x=.,.y=names(.),.f=function(p_, TF_){
+    p_$labels$title -> title_
+    print(title_)
+    p_$data -> df_
+    df_ %>% 
+      group_by(group) %>% 
+      group_map(function(df_,y){
+        max(df_$measure) - min(df_$measure) -> range_original
+        df_ %>% 
+          dplyr::mutate(measure = scales::rescale(measure, to = c(0,1))) %>% 
+          dplyr::mutate(sd = sd/range_original) -> df_
+      }, .keep = T) %>% do.call(rbind, .) -> df_
+    motif_expr[TF_, ] %>% dplyr::select(-TRIPOD) %>% 
+      pivot_longer(everything(), names_to = "group") %>% 
+      dplyr::mutate(ZT = gsub("(ZT\\d+?)_.+", "\\1", group)) %>% 
+      group_by(ZT) %>% 
+      group_map(function(df_1, y){
+        df_1$value %>% mean() -> mean_
+        df_1$value %>% sd() -> sd_
+        ZT_ = y$ZT %>% gsub("ZT(\\d+)", "\\1", .) %>% as.integer()
+        data.frame(group = "motif", ZT = ZT_, measure = mean_, sd = sd_)
+      }, .keep = T) %>% do.call(rbind, .) -> df_1
+    
+    max(df_1$measure) - min(df_1$measure) -> range_original
+    df_1 %>% 
+      dplyr::mutate(measure = scales::rescale(measure, to = c(0,1))) %>% 
+      dplyr::mutate(sd = sd/range_original) -> df_1
+    
+    rbind(df_, df_1) -> df_
+    df_ %>% 
+      ggplot(aes(x = ZT, y = measure, group = group, color = group, fill = group)) + 
+      geom_line() + 
+      geom_ribbon(aes(ymin = measure-sd, ymax = measure+sd), alpha = 0.2, color = NA) + 
+      scale_x_continuous(breaks = c(2,6,10,14,18,22)) + 
+      ylab("relative value (TF expr, motif score, \nCRE accessibility, gene expr)") -> p
+    p + ggtitle(title_) -> p
+    p + scale_color_manual(values = c(peak = "#f3766e", target_gene = "#2ab34b", TF = "#7094cd", motif = "#a781ba")) -> p
+    p + scale_fill_manual(values = c(peak = "#f3766e", target_gene = "#2ab34b", TF = "#7094cd", motif = "#a781ba")) -> p
+  }) -> p_list_
+patchwork::wrap_plots(p_list_[1:4], ncol = 4, nrow = 1, guides = "collect") #Fig 4B
+p_list_[[5]] #Fig 4C
+
+
+Plot_ChIP(TF = "Bmal1", Peak = "chr1-39102368-39103276") -> p1
+Plot_CHI_C(target_gene = "Npas2", Peak = "chr1-39102368-39103276") -> p2
+combine_ChIP_CHI_C(ChIP_plot = p1, CHI_C_plot = p2) -> p3 #Fig 4C
+
+library(BSgenome.Mmusculus.UCSC.mm10)
+gr = GRanges(seqnames = "chr1", ranges = IRanges(start = 39102368, end = 39103276))
+genome <- BSgenome.Mmusculus.UCSC.mm10
+dna_sequence <- getSeq(genome, gr)
+dna_sequence <- dna_sequence[[1]]
+ebox = "CACGTG"
+motif_seq <- DNAString(ebox)
+motif_pattern <- "CA..TG"
+matches <- matchPattern(motif_seq, dna_sequence)
+motif_df = as.data.frame(matches)
+sequence_df <- data.frame(
+  idx = 1:length(dna_sequence),
+  position = as.data.frame(gr)$start:as.data.frame(gr)$end,
+  nucleotide = as.character(dna_sequence) %>% str_split("") %>% .[[1]]
+)
+sequence_df = sequence_df[1:50,]
+sequence_df$motif <- ifelse(sequence_df$idx %in% motif_df$start:(motif_df$end), "Motif", "Background")
+
+ggplot(sequence_df, aes(x = position, y = 0, label = nucleotide, color = motif)) +
+  geom_text(size = 5) + # Add nucleotide letters
+  theme_minimal() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid = element_blank()) + 
+  ylab("") + 
+  xlab("chr1") + 
+  scale_x_continuous(breaks =  seq(sequence_df$position[1], sequence_df$position[nrow(sequence_df)], by = 10)) + 
+  coord_fixed(ratio = 20) -> p_atac_peak #Fig 4C
+
+#Plot Bmal1 KO vs WT (Npas2 and Cry1)
+readxl::read_xlsx(path = "~/Dropbox/singulomics/MS22_Greenwell_Total_Nuclear_polysome_BMKO_v1.xlsx", sheet = 1) -> df_
+df_[4:nrow(df_), ] %>% 
+  {
+    df_ = .
+    df_[1,1] = "Gene"
+    df_
+  } %>% 
+  "colnames<-"(., .[1,]) %>% 
+  .[-1, ] %>% 
+  dplyr::select(matches("Gene|KO\\d+ZT\\d+")) %>% 
+  dplyr::mutate(across(matches("KO"), function(x){as.numeric(x)})) -> Bmal1_KO_df
+
+df_[4:nrow(df_), ] %>% 
+  {
+    df_ = .
+    df_[1,1] = "Gene"
+    df_
+  } %>% 
+  "colnames<-"(., .[1,]) %>% 
+  .[-1, ] %>% 
+  dplyr::select(matches("Gene|NU\\d+ZT\\d+")) %>% 
+  dplyr::mutate(across(matches("NU"), function(x){as.numeric(x)})) -> Bmal1_WT_df
+
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+Bmal1_KO_df$Gene %>% table() %>% {.[. > 1]} %>% names() -> excluded_genes
+Bmal1_KO_df %>% 
+  dplyr::filter(!(Gene %in% excluded_genes)) %>% 
+  {
+    df_ = .
+    gene_ = df_$Gene
+    timepoint_ = colnames(df_)[-1] %>% gsub("KO\\d+ZT(\\d+)", "\\1", .) %>% as.integer()
+    rep_ = colnames(df_)[-1] %>% gsub("KO(\\d+)ZT\\d+", "\\1", .) %>% as.integer()
+    exp_mat_ = df_ %>% dplyr::select(-Gene)
+    sprintf("ZT%s_REP%s", timepoint_, rep_) -> colnames(exp_mat_)
+    colnames(exp_mat_)
+    cyclic_HMP(exp_matrix = exp_mat_, gene = gene_, timepoint = timepoint_) -> res_
+    res_
+  } -> res_pval_KO
+res_pval_KO %>% dplyr::select(matches("Gene|JTK|HR")) %>% 
+  recal_cauchy_p_and_hmp() -> res_pval_KO
+
+Bmal1_WT_df$Gene %>% table() %>% {.[. > 1]} %>% names() -> excluded_genes
+Bmal1_WT_df %>% 
+  dplyr::filter(!(Gene %in% excluded_genes)) %>% 
+  {
+    df_ = .
+    gene_ = df_$Gene
+    timepoint_ = colnames(df_)[-1] %>% gsub("NU\\d+ZT(\\d+)", "\\1", .) %>% as.integer()
+    rep_ = colnames(df_)[-1] %>% gsub("NU(\\d+)ZT\\d+", "\\1", .) %>% as.integer()
+    exp_mat_ = df_ %>% dplyr::select(-Gene)
+    sprintf("ZT%s_REP%s", timepoint_, rep_) -> colnames(exp_mat_)
+    colnames(exp_mat_)
+    cyclic_HMP(exp_matrix = exp_mat_, gene = gene_, timepoint = timepoint_) -> res_
+    res_
+  } -> res_pval_WT
+res_pval_WT %>% dplyr::select(matches("Gene|JTK|HR")) %>% 
+  recal_cauchy_p_and_hmp() -> res_pval_WT
+
+res_pval_KO %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Npas2")
+res_pval_WT %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Npas2")
+
+list(WT = Bmal1_WT_df, KO = Bmal1_KO_df) %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    group_ = y
+    df_ = x
+    df_ %>% dplyr::filter(Gene == "Npas2") %>% 
+      pivot_longer(cols = -Gene, names_to = "ZT", values_to = "measure") %>% 
+      dplyr::mutate(Rep = gsub(".+?(\\d+)ZT(\\d+)", "\\1", ZT)) %>% 
+      dplyr::mutate(ZT = gsub(".+?(\\d+)ZT(\\d+)", "\\2", ZT) %>% as.integer()) %>% 
+      group_by(Gene, ZT) %>% 
+      summarise(expression = mean(measure), sd = sd(measure)) %>% 
+      ungroup() %>% 
+      dplyr::mutate(group = group_)
+  }) %>% do.call(rbind, .) %>% 
+  ggplot(aes(x = ZT, y = expression, fill = group, color = group)) +
+  geom_line() + 
+  geom_ribbon(aes(ymin = expression - sd, ymax = expression + sd), alpha = 0.3, color = NA) #Fig 4C
+
+res_pval_KO %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Per1")
+res_pval_WT %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Per1")
+
+list(WT = Bmal1_WT_df, KO = Bmal1_KO_df) %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    group_ = y
+    df_ = x
+    df_ %>% dplyr::filter(Gene == "Cry1") %>% 
+      pivot_longer(cols = -Gene, names_to = "ZT", values_to = "measure") %>% 
+      dplyr::mutate(Rep = gsub(".+?(\\d+)ZT(\\d+)", "\\1", ZT)) %>% 
+      dplyr::mutate(ZT = gsub(".+?(\\d+)ZT(\\d+)", "\\2", ZT) %>% as.integer()) %>% 
+      group_by(Gene, ZT) %>% 
+      summarise(expression = mean(measure), sd = sd(measure)) %>% 
+      ungroup() %>% 
+      dplyr::mutate(group = group_)
+  }) %>% do.call(rbind, .) %>% 
+  ggplot(aes(x = ZT, y = expression, fill = group, color = group)) +
+  geom_line() + 
+  geom_ribbon(aes(ymin = expression - sd, ymax = expression + sd), alpha = 0.3, color = NA) #Fig 4C
+
+trios_res_df_2 %>% 
+  dplyr::filter(model_1 == "TRIPOD", gene_cauchy_BH.Q < 0.05, TF_cauchy_BH.Q < 0.05, peak_cauchy_BH.Q < 0.05) %>% 
+  #  head() %>% 
+  rowwise() %>% 
+  dplyr::mutate(delta_phase_gene_TF = case_when(gene_phase - TF_phase > 12 ~ (gene_phase - TF_phase)-24, 
+                                                gene_phase - TF_phase < -12 ~ (gene_phase - TF_phase)+24, 
+                                                TRUE ~ gene_phase - TF_phase)) %>% 
+  dplyr::mutate(delta_phase_peak_TF = case_when(peak_phase - TF_phase > 12 ~ (peak_phase-TF_phase)-24, 
+                                                peak_phase - TF_phase < -12 ~ (peak_phase-TF_phase)+24, 
+                                                TRUE ~ peak_phase - TF_phase)) %>% 
+  dplyr::mutate(delta_phase_gene_peak = case_when(gene_phase - peak_phase > 12 ~ (gene_phase - peak_phase)-24, 
+                                                  gene_phase - peak_phase < -12 ~ (gene_phase - peak_phase)+24,
+                                                  TRUE ~ gene_phase - peak_phase)) %>% 
+  ungroup() %>%
+  #  dplyr::mutate(across(matches("delta_phase"), function(x){ifelse(x < -12, x+24, ifelse(x > 12, x-24, x))})) %>% 
+  ungroup() -> trios_res_df_3
+
+#Plot Arntl and Nr1d1 regulation
+trios_res_df_3 %>% dplyr::filter(TF == "Arntl") %>% 
+  dplyr::mutate(peak_phase = case_when(
+    gene_phase - peak_phase > 12 ~ peak_phase + 24,
+    gene_phase - peak_phase < -12 ~ peak_phase - 24,
+    TRUE ~ peak_phase
+  )) %>% 
+  {
+    df_ = .
+    cor_ = cor(df_$gene_phase, df_$peak_phase, method = "pearson") %>% round(2)
+    TF_phase = df_$TF_phase %>% unique()
+    TF_phase - 12 -> TF_phase_12
+    df_ %>% dplyr::filter(gene_phase>TF_phase-2.5, gene_phase<TF_phase+2.5) %>% .$gene %>% unique() ->> fast_regulated_genes
+    df_ %>% dplyr::filter(gene_phase>TF_phase_12-2.5, gene_phase<TF_phase_12+2.5) %>% .$gene %>% unique() ->> latent_regulated_genes
+#    sprintf("Fast_regulated_genes: %s\nLatent_regulated_genes: %s", paste(fast_regulated_genes, collapse = ", "), paste(latent_regulated_genes, collapse = ", ")) %>% print()
+    
+    df_$group = ifelse(df_$gene %in% Core_clock_genes, "Core_clock_genes", "Other_genes")
+    df_[, c("TF", "peak", "gene", "TF_phase", "peak_phase", "gene_phase", "group")] %>% distinct() -> df_
+    print(df_ %>% dplyr::filter(gene == "Nr1d1"))
+    df_ %>% 
+    ggplot(aes(x = gene_phase, y = peak_phase)) + 
+      #  geom_hex(bins = 50) + 
+      geom_point(size = 0.5) + 
+      geom_text_repel(data = subset(df_, group == "Core_clock_genes"), 
+                      aes(label = gene), 
+                      nudge_y = 5, 
+                      direction = "y") + 
+      geom_abline(color = "red", linetype = 2) + 
+      geom_vline(xintercept = TF_phase, color = "blue", linetype = 2) + 
+      geom_ribbon(aes(xmin = TF_phase-2.5, xmax = TF_phase+2.5), fill = "blue", alpha = 0.2) + 
+      geom_ribbon(aes(xmin = (TF_phase-12)-2.5, xmax = (TF_phase-12)+2.5), fill = "green", alpha = 0.2) + 
+      theme_classic() + 
+      ggtitle(sprintf("r=%s", cor_))
+  } #Fig 4D
+
+trios_res_df_3 %>% dplyr::filter(TF == "Nr1d1") %>% 
+  dplyr::filter(gene %in% Core_clock_genes) %>% View()
+
+trios_res_df_3 %>% dplyr::filter(TF == "Nr1d1") %>% 
+  dplyr::mutate(peak_phase = case_when(
+    gene_phase - peak_phase > 12 ~ peak_phase + 24,
+    gene_phase - peak_phase < -12 ~ peak_phase - 24,
+    TRUE ~ peak_phase
+  )) %>% 
+  {
+    df_ = .
+    cor_ = cor(df_$gene_phase, df_$peak_phase, method = "pearson") %>% round(2)
+    TF_phase = df_$TF_phase %>% unique()
+    TF_phase - 12 -> TF_phase_12
+    df_ %>% dplyr::filter(gene_phase>TF_phase-2.5, gene_phase<TF_phase+2.5) %>% .$gene %>% unique() ->> fast_regulated_genes
+    df_ %>% dplyr::filter(gene_phase>TF_phase_12-2.5, gene_phase<TF_phase_12+2.5) %>% .$gene %>% unique() ->> latent_regulated_genes
+    #    sprintf("Fast_regulated_genes: %s\nLatent_regulated_genes: %s", paste(fast_regulated_genes, collapse = ", "), paste(latent_regulated_genes, collapse = ", ")) %>% print()
+    
+    df_$group = ifelse(df_$gene %in% Core_clock_genes, "Core_clock_genes", "Other_genes")
+    df_[, c("TF", "peak", "gene", "TF_phase", "peak_phase", "gene_phase", "group")] %>% distinct() -> df_
+    print(df_ %>% dplyr::filter(gene == "Nr1d1"))
+    df_ %>% 
+      ggplot(aes(x = gene_phase, y = peak_phase)) + 
+      #  geom_hex(bins = 50) + 
+      geom_point(size = 0.5) + 
+      geom_text_repel(data = subset(df_, group == "Core_clock_genes"), 
+                      aes(label = gene), 
+                      nudge_y = 5, 
+                      direction = "y") + 
+      geom_abline(color = "red", linetype = 2) + 
+      geom_vline(xintercept = TF_phase, color = "blue", linetype = 2) + 
+      geom_ribbon(aes(xmin = TF_phase-2.5, xmax = TF_phase+2.5), fill = "blue", alpha = 0.2) + 
+      geom_ribbon(aes(xmin = (TF_phase+12)-2.5, xmax = (TF_phase+12)+2.5), fill = "green", alpha = 0.2) + 
+      theme_classic() + 
+      ggtitle(sprintf("r=%s", cor_))
+  } #Fig 4D
+
+#Plot Anrtl's TFs
+Arntl_TF = c("Mef2c", "Klf1", "Nr5a2", "Mef2d", "Foxa3", "Esrra", "Hnf4a", "Mef2a", "Nfyb", "Ppard")
+trios_res_df_2 %>% 
+  dplyr::filter(model_1 == "TRIPOD", TF %in% Arntl_TF, gene == "Arntl") %>% 
+  dplyr::filter((CHI_C_validate == "TRUE")) %>% 
+  dplyr::arrange(TF) %>% 
+  {
+    df_ = .
+    df_[,c("gene", "peak", "TF", "CHI_C_validate", "ChIP_seq_validated")] %>% distinct() -> df_
+    df_ %>% dplyr::mutate(validation = case_when(
+      (CHI_C_validate == "TRUE")&(ChIP_seq_validated != "TRUE") ~ "CHI_C",
+      (ChIP_seq_validated == "TRUE")&(CHI_C_validate != "TRUE") ~ "ChIP-seq",
+      (ChIP_seq_validated == "TRUE")&(CHI_C_validate == "TRUE") ~ "Both"
+    )) -> df_
+    df_$TF %>% 
+      unique() %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        TF_ = x
+        df_ %>% dplyr::filter(TF == TF_) -> df_
+        1:nrow(df_) %>% 
+          map(function(i){
+            df_[i, ] -> df_
+            PlotGenePeakTF_custom(gene = df_$gene, TF = df_$TF, peak = df_$peak) -> p
+            PlotGenePeakTF_custom_1(p) -> p
+            p + ggtitle(sprintf("TF: %s\nTarget gene: %s\nCRE: %s\nValidation: %s", df_$TF, df_$gene, df_$peak, df_$validation)) -> p
+            return(p)
+          }) -> p_list
+      }) -> p_list
+    p_list
+  } -> p_list #Supp Fig 22
+
+p_list$Mef2a[[1]]
+p_list$Mef2d[[1]]
+p_list$Ppard[[2]]
+p_list$Nr5a2[[1]]
+p_list$Nfyb[[1]]
+
+#Plot regulatory network of clock genes
+Core_clock_genes = c("Dbp", "Arntl", "Bhlhe40", "Bhlhe41", "Nfil3", "Rorc", "Rora", "Nr1d1", "Clock", "Npas2", "Cry1", "Ciart", "Per1", "Per2")
+TF_clock_genes = c("Dbp", "Arntl", "Bhlhe40", "Bhlhe41", "Nfil3", "Rora", "Rorc", "Nr1d1", "Clock", "Npas2")
+
+trios_res_df_1 %>% 
+  dplyr::filter(model_1 == "TRIPOD", gene %in% Core_clock_genes, 
+                TF %in% Core_clock_genes,
+                #                peak_cauchy_BH.Q < 0.05, 
+                gene_cauchy_BH.Q < 0.05, 
+                TF_cauchy_BH.Q < 0.05
+  ) -> df_
+head(df_)
+dim(df_)
+
+df_ %>% 
+  group_by(gene, peak, TF) %>% 
+  group_map(function(x, y){
+    x$peak_biotype %>% unique() %>% paste(., collapse = ";") -> peak_biotype_
+    x$CHI_C_validate %>% unique() %>% paste(., collapse = ";") -> CHI_C_validate_
+    data.frame(gene = y$gene, peak = y$peak, TF = y$TF, peak_biotype = peak_biotype_, CHI_C_validate = CHI_C_validate_)
+  }, .keep = T) %>% 
+  do.call(rbind, .) -> df_
+dim(df_)
+View(df_)
+
+Core_clock_genes %>% 
+  as.data.frame() %>% 
+  "colnames<-"(., "name") %>% 
+  mutate(category = case_when(
+    name %in% df_$TF ~ "TF/gene",
+    TRUE ~ "gene"
+  )) -> nodes
+nodes %>% filter(name %in% c(df_$gene, df_$TF)) -> nodes
+df_ %>% 
+  dplyr::select(TF, gene, peak, peak_biotype, CHI_C_validate) %>% 
+  "colnames<-"(.,c("from", "to", "by", "peak_biotype", "CHI_C_validate")) -> edges
+edges %>% dplyr::mutate(CHI_C_validate = as.character(CHI_C_validate)) -> edges
+
+g <- igraph::graph_from_data_frame(d = edges, vertices = nodes, directed = TRUE)
+#category_colors <- c("eRNA" = "red", "No annotation" = "blue")
+#igraph::E(g)$color <- category_colors[edges$category]
+igraph::E(g)$color <- "blue"
+node_colors <- c("TF/gene" = "lightblue", "gene" = "orange")
+igraph::V(g)$color <- node_colors[nodes$category]
+line_types <- c("TRUE" = "solid", "FALSE" = "dashed")
+igraph::E(g)$lty <- line_types[edges$CHI_C_validate]
+#igraph::E(g)$width <- edges$weight
+
+layout_kk <- igraph::layout_with_kk(g)
+layout_circle <- igraph::layout.circle(g)
+
+plot(g,
+     #     layout = layout_kk,
+     layout = layout_circle,
+     edge.arrow.size = 0.4,        # Size of the arrow heads
+     edge.curved = 0.3,            # Curvature of the edges
+     vertex.size = 24,             # Size of the vertices
+     vertex.label.color = "black", # Color of the vertex labels
+     vertex.label.cex = 1,       # Font size of the vertex labels
+     #     edge.width = igraph::E(g)$width,
+     edge.lty = igraph::E(g)$lty,          # Linetypes of the edges
+) #Supp Fig 23
+
+#Plot Chromatin States validation
+load("~/Dropbox/singulomics/github_rda/TRIPOD/ChromHMM_dat.RData")
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/metacell.peak.rda')
+
+c("chromatin_state_15", "chromatin_state_18") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    trios_res_df_2 %>% 
+      dplyr::filter(model_1 == "TRIPOD") -> df_
+    df_[[x]] %>% str_split(";") %>% unlist() -> chromatin_state
+    table(chromatin_state) %>% 
+      {(./sum(.))*100} %>% 
+      as.data.frame() -> df_
+    df_$chromatin_state %>% {.[!grepl("no_annotation", .)]} %>% as.character() %>% c(., "no_annotation") -> level_
+    df_ %>% mutate(chromatin_state = factor(chromatin_state, level = level_)) -> df_
+    df_ %>% 
+      ggplot(aes(x = chromatin_state, y = Freq, fill = chromatin_state)) + 
+      geom_bar(stat = "identity") + 
+      theme_classic() + 
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+      ylab("Percentage") + 
+      xlab(NULL)
+  }) -> p_list
+
+mapping_df_list_all %>%
+  map(function(x){
+    df_ = x
+    colnames(metacell.peak) %>% 
+      as.data.frame() %>% 
+      "colnames<-"(., "peak") %>% 
+      #      head(500) %>% 
+      left_join(x = ., y = df_, by = "peak") -> df_
+    df_ %>% mutate(chromatin_state = case_when(
+      is.na(chromatin_state) ~ "no_annotation",
+      TRUE ~ chromatin_state
+    )) -> df_
+    
+    df_$chromatin_state %>% 
+      str_split(";") %>%
+      unlist() %>% 
+      table() %>% 
+      {
+        (./sum(.))*100
+      } -> chromatin_state
+    chromatin_state %>% 
+      as.data.frame() %>% 
+      "colnames<-"(., c("chromatin_state", "Freq")) -> df_
+    df_$chromatin_state %>% {.[!grepl("no_annotation", .)]} %>% as.character() %>% c(., "no_annotation") -> level_
+    df_ %>% dplyr::mutate(chromatin_state = factor(chromatin_state, level = level_)) -> df_
+    df_ %>% 
+      ggplot(aes(x = chromatin_state, y = Freq, fill = chromatin_state)) + 
+      geom_bar(stat = "identity") + 
+      theme_classic() + 
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+      ylab("Percentage") + 
+      xlab(NULL)
+  }) -> p_list_1
+
+trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD") %>% .$peak %>% unique() %>% length() -> N_TRIPOD_unique_peaks
+mapping_df_list_all %>%
+  map(function(x){
+    set.seed(123)
+    df_ = x
+    colnames(metacell.peak) %>% 
+      sample(., N_TRIPOD_unique_peaks, replace = F) %>%
+      as.data.frame() %>% 
+      "colnames<-"(., "peak") %>% 
+      #      head(500) %>% 
+      left_join(x = ., y = df_, by = "peak") -> df_
+    df_ %>% mutate(chromatin_state = case_when(
+      is.na(chromatin_state) ~ "no_annotation",
+      TRUE ~ chromatin_state
+    )) -> df_
+    
+    df_$chromatin_state %>% 
+      str_split(";") %>%
+      unlist() %>% 
+      table() %>% 
+      {
+        (./sum(.))*100
+      } -> chromatin_state
+    chromatin_state %>% 
+      as.data.frame() %>% 
+      "colnames<-"(., c("chromatin_state", "Freq")) -> df_
+    df_$chromatin_state %>% {.[!grepl("no_annotation", .)]} %>% as.character() %>% c(., "no_annotation") -> level_
+    df_ %>% dplyr::mutate(chromatin_state = factor(chromatin_state, level = level_)) -> df_
+    df_ %>% 
+      ggplot(aes(x = chromatin_state, y = Freq, fill = chromatin_state)) + 
+      geom_bar(stat = "identity") + 
+      theme_classic() + 
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+      ylab("Percentage") + 
+      xlab(NULL)
+  }) -> p_list_2
+
+ggplot() + 
+  geom_bar(data = p_list$chromatin_state_18$data, aes(x = chromatin_state, y = Freq, fill = chromatin_state), stat = "identity") + 
+  geom_bar(data = p_list_1$`18-State`$data, aes(x = chromatin_state, y = Freq), stat = "identity", width = 0.5) + 
+  geom_bar(data = p_list_2$`18-State`$data, aes(x = chromatin_state, y = Freq), stat = "identity", width = 0.2, fill = "grey") + 
+  theme_classic() + 
+  ylab("Percentage") + 
+  xlab(NULL) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) -> p18_state
+
+  list(
+  TRIPOD = p18_state$layers[[1]]$data,
+  All_peaks = p18_state$layers[[2]]$data,
+  Random_peaks = p18_state$layers[[3]]$data
+) %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    df_ = x
+    colnames(df_) = c("choromatine_state", "Percentage")
+    df_[["group"]] <- y
+#    head(df_)
+    df_
+  }) %>% do.call(rbind, .) %>% 
+  dplyr::arrange(choromatine_state) %>% 
+  "rownames<-"(., 1:nrow(.)) -> p18_state_df
+
+write.csv(p18_state_df, file = "~/Downloads/chromatin_state_df.csv", row.names = F, quote = F)
+read.csv("~/Downloads/chromatin_state_df.csv", header = T, stringsAsFactors = F) -> chromatin
+
+chromatin=cbind(chromatin, newstate=NA)
+
+chromatin$newstate[grep('Tss',chromatin$choromatine_state)]='TSS'
+chromatin$newstate[grep('Tx',chromatin$choromatine_state)]='Transcription'
+chromatin$newstate[grep('Enh',chromatin$choromatine_state)]='Enhancer'
+chromatin$newstate[grep('Quies',chromatin$choromatine_state)]='Quiescent'
+chromatin$newstate[grep('Repr',chromatin$choromatine_state)]='Repressive'
+chromatin$newstate[grep('Het',chromatin$choromatine_state)]='Repressive'
+
+chromatin=chromatin[-grep('no_annotation',chromatin$choromatine_state),]
+
+# Need to rescale the prop to sum up to 1.
+all_peaks=chromatin[chromatin$group=='All_peaks',]
+all_peaks$Percentage=all_peaks$Percentage/sum(all_peaks$Percentage)
+all_peaks=aggregate(Percentage~newstate+group, all_peaks, sum)
+
+tripod=chromatin[chromatin$group=='TRIPOD',]
+tripod$Percentage=tripod$Percentage/sum(tripod$Percentage)
+tripod=aggregate(Percentage~newstate+group, tripod, sum)
+
+to_plot=rbind(all_peaks, tripod)
+to_plot$newstate=factor(to_plot$newstate, levels= c('Transcription', 'TSS',
+                                                    'Enhancer', 'Repressive',
+                                                    'Quiescent'))
+
+library(ggplot2)
+p=ggplot(data=to_plot, aes(x=newstate, y=Percentage, fill=group)) +
+  geom_bar(stat="identity", color="black", position=position_dodge())+
+  theme_minimal() + xlab("chromHMM states")+ scale_fill_manual(values=c('#999999','#E69F00')) #Fig 4E
+
+# Plot CHI-C validation
+load(file = "~/Dropbox/singulomics/github_rda/TRIPOD/GSE155161_CHI-C_annotated.rda")
+
+intersect(
+trios_res_df_2 %>% filter(model_1 == "TRIPOD") %>% .$gene %>% unique(),
+GSE155161_annotated_CHI_C$gene %>% unique()
+) -> intersected_genes
+length(intersected_genes)
+
+c(
+  trios_res_df_2 %>% filter(model_1 == "TRIPOD") %>% .$gene %>% unique(),
+  GSE155161_annotated_CHI_C$gene %>% unique()
+) %>% unique() %>% 
+  "names<-"(., .) %>% 
+#  .[1] %>% 
+  map(function(x){
+    gene_ = x
+    if (gene_ %in% (trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD") %>% .$gene)){
+      trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD" & gene == gene_) %>% dplyr::select(gene, peak) -> trios_res_df_2
+      trios_res_df_2 = data.frame(
+        chr = trios_res_df_2$peak %>% gsub("(.+)-(.+)-(.+)", "\\1", .), 
+        start = trios_res_df_2$peak %>% gsub("(.+)-(.+)-(.+)", "\\2", .) %>% as.integer(), 
+        end = trios_res_df_2$peak %>% gsub("(.+)-(.+)-(.+)", "\\2", .) %>% as.integer() 
+      )      
+    }else{
+      data.frame(chr = character(), start = integer(), end = integer()) -> trios_res_df_2
+    }
+
+    if (gene_ %in% GSE155161_annotated_CHI_C$gene){
+      GSE155161_annotated_CHI_C %>% dplyr::filter(gene == gene_) -> GSE155161_annotated_CHI_C
+      GSE155161_annotated_CHI_C = data.frame(
+        chr = GSE155161_annotated_CHI_C$CRE %>% gsub("(.+):(.+):(.+)", "\\1", .), 
+        start = GSE155161_annotated_CHI_C$CRE %>% gsub("(.+):(.+):(.+)", "\\2", .) %>% as.integer(), 
+        end = GSE155161_annotated_CHI_C$CRE %>% gsub("(.+):(.+):(.+)", "\\3", .) %>% as.integer() 
+      )      
+    }else{
+      data.frame(chr = character(), start = integer(), end = integer()) -> GSE155161_annotated_CHI_C
+    }
+
+    rbind(trios_res_df_2, GSE155161_annotated_CHI_C) -> df_final
+    if (nrow(df_final) >= 1){
+      df_final %>% bedtoolsr::bt.sort() %>% bedtoolsr::bt.merge() %>% 
+        mutate(V4 = gene_) -> df_final      
+    }else{
+      df_final = data.frame(chr = character(), start = integer(), end = integer(), V4 = character())
+    }
+    return(df_final)
+  }) %>% do.call(rbind, .) -> all_gene_peaks_linkage
+
+library(furrr)
+2000*1024^2 -> max_size
+options(future.globals.maxSize= max_size)
+plan(multisession, workers = 6)
+
+intersected_genes %>% 
+  "names<-"(.,.) %>% 
+#  .[1] %>% 
+#  .["Tmem14a"] %>% 
+  future_map(function(x){
+    gene_ = x
+    print(gene_)
+    
+    trios_res_df_2 %>% filter(model_1 == "TRIPOD" & gene == gene_) -> df_trios
+    GenomicRanges::GRanges(gene = sprintf("peak_%s_%s", gene_, 1:nrow(df_trios)), 
+               seqnames = df_trios$peak %>% gsub("(.+)-.+-.+", "\\1", .), 
+               IRanges::IRanges(start = df_trios$peak %>% gsub("(.+)-(.+)-.+", "\\2", .) %>% as.integer(), 
+                                end = df_trios$peak %>% gsub("(.+)-(.+)-(.+)", "\\3", .) %>% as.integer()
+               ) 
+               ) -> df_trios
+    df_trios = unique(df_trios)
+    
+    GSE155161_annotated_CHI_C %>% filter(gene == gene_) -> df_CHI_C
+    GenomicRanges::GRanges(gene = sprintf("CRE_%s_%s", gene_, 1:nrow(df_CHI_C)), 
+                           seqnames = df_CHI_C$CRE %>% gsub("(.+):.+:.+", "\\1", .), 
+                           IRanges::IRanges(start = df_CHI_C$CRE %>% gsub("(.+):(.+):.+", "\\2", .) %>% as.integer(), 
+                                            end = df_CHI_C$CRE %>% gsub("(.+):(.+):(.+)", "\\3", .) %>% as.integer()
+                           ) 
+    ) -> df_CHI_C
+    df_CHI_C = unique(df_CHI_C)
+    
+    ChIPpeakAnno::findOverlapsOfPeaks(df_trios, df_CHI_C, maxgap = 1000) -> ol
+    ol$venn_cnt -> venn_cnt
+    venn_cnt[3, "count.df_trios"] -> trios_peak_unique
+    venn_cnt[2, "count.df_CHI_C"] -> CHI_C_peak_unique
+    venn_cnt[4, "count.df_trios"] -> trios_peak_intersect
+    venn_cnt[4, "count.df_CHI_C"] -> CHI_C_peak_intersect
+    data.frame(gene = gene_, trios_peak_unique = trios_peak_unique,
+               CHI_C_peak_unique = CHI_C_peak_unique, trios_peak_intersect = trios_peak_intersect,
+               CHI_C_peak_intersect = CHI_C_peak_intersect) -> df_final
+    intersected_peaks = max(trios_peak_intersect, CHI_C_peak_intersect)
+    A = intersected_peaks+trios_peak_unique
+    B = intersected_peaks+CHI_C_peak_unique
+    N = nrow(all_gene_peaks_linkage)
+    k = intersected_peaks
+    p_value <- phyper(k - 1, A, N - A, B, lower.tail = FALSE)
+    df_final %>% mutate(p_value = p_value) -> df_final
+  }) -> gene_peak_linkage_hypergeometric_test
+
+gene_peak_linkage_hypergeometric_test %>% do.call(rbind, .) -> gene_peak_linkage_hypergeometric_test_df
+
+save(all_gene_peaks_linkage, gene_peak_linkage_hypergeometric_test_df, file = "~/Dropbox/singulomics/github_rda/TRIPOD/hypergeometic_test_dat.rda")
+
+#Boxplot (hypergeometric test) -> TRIPOD vs CHI-C ----
+c("p_val", "neg_log10_p_val") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    gene_peak_linkage_hypergeometric_test_df %>% 
+      mutate(p_value = case_when(
+        p_value == 0 ~ .Machine$double.eps, 
+        TRUE ~ p_value
+      )) %>% mutate(group = "TRIPOD vs CHI-C") %>% 
+      dplyr::filter(p_value < 0.05) -> df_
+    
+    n_gene = df_$gene %>% unique() %>% length()
+    n_sign = df_ %>% filter(p_value < 0.05) %>% nrow()
+    median_ = df_$p_value %>% median() %>% sprintf("%.2e", .)
+    
+    if (x == "p_val"){
+      df_ %>% 
+        ggplot(aes(x = group, y = p_value, fill = group)) -> p
+    }else{
+      df_ %>% 
+        ggplot(aes(x = group, y = -log10(p_value), fill = group)) -> p
+    }
+
+    p + 
+      geom_boxplot(width = 0.5) + 
+      theme_classic() + 
+      xlab(NULL)  -> p
+    
+    if (x == "p_val"){
+      p + ylab("Hypergeometric test p-value") -> p
+    }else{
+      p + ylab("Hypergeometric test -log10(p-value)") -> p
+    }
+    
+    p + theme(legend.position = "none") +
+      ggtitle(sprintf("%s sig. genes\nP-value median: %s", n_sign, median_)) -> p
+  }) -> p_list
+
+gene_peak_linkage_hypergeometric_test_df %>% 
+  mutate(p_value = case_when(
+    p_value == 0 ~ .Machine$double.eps, 
+    TRUE ~ p_value
+  )) %>% mutate(group = "TRIPOD vs CHI-C") %>% 
+  dplyr::filter(p_value < 0.05) %>% 
+  mutate(p_value = -log(p_value, 10)) %>% 
+  ggplot(aes(x = p_value)) + 
+  geom_histogram(binwidth = 0.5, color = "black") + 
+  xlab("Hypergeometric test -log10(p-value)") + 
+  ggtitle("4241 sig. genes") + 
+  theme_classic() -> p
+
+trios_res_df_2 %>% 
+  {
+    df_ = .
+    set.seed(123)
+    sample(1:nrow(df_), nrow(df_), replace = F) -> se
+    df_[["peak"]] = df_[["peak"]][se]
+    df_
+  } -> trios_res_df_2_shuffled
+
+intersected_genes %>% 
+  "names<-"(.,.) %>% 
+  #  .[1] %>% 
+  #  .["Tmem14a"] %>% 
+  future_map(function(x){
+    gene_ = x
+    print(gene_)
+    
+    trios_res_df_2_shuffled %>% filter(model_1 == "TRIPOD" & gene == gene_) -> df_trios
+    GenomicRanges::GRanges(gene = sprintf("peak_%s_%s", gene_, 1:nrow(df_trios)), 
+                           seqnames = df_trios$peak %>% gsub("(.+)-.+-.+", "\\1", .), 
+                           IRanges::IRanges(start = df_trios$peak %>% gsub("(.+)-(.+)-.+", "\\2", .) %>% as.integer(), 
+                                            end = df_trios$peak %>% gsub("(.+)-(.+)-(.+)", "\\3", .) %>% as.integer()
+                           ) 
+    ) -> df_trios
+    df_trios = unique(df_trios)
+    
+    GSE155161_annotated_CHI_C %>% filter(gene == gene_) -> df_CHI_C
+    GenomicRanges::GRanges(gene = sprintf("CRE_%s_%s", gene_, 1:nrow(df_CHI_C)), 
+                           seqnames = df_CHI_C$CRE %>% gsub("(.+):.+:.+", "\\1", .), 
+                           IRanges::IRanges(start = df_CHI_C$CRE %>% gsub("(.+):(.+):.+", "\\2", .) %>% as.integer(), 
+                                            end = df_CHI_C$CRE %>% gsub("(.+):(.+):(.+)", "\\3", .) %>% as.integer()
+                           ) 
+    ) -> df_CHI_C
+    df_CHI_C = unique(df_CHI_C)
+    
+    ChIPpeakAnno::findOverlapsOfPeaks(df_trios, df_CHI_C, maxgap = 1000) -> ol
+    ol$venn_cnt -> venn_cnt
+    venn_cnt[3, "count.df_trios"] -> trios_peak_unique
+    venn_cnt[2, "count.df_CHI_C"] -> CHI_C_peak_unique
+    venn_cnt[4, "count.df_trios"] -> trios_peak_intersect
+    venn_cnt[4, "count.df_CHI_C"] -> CHI_C_peak_intersect
+    data.frame(gene = gene_, trios_peak_unique = trios_peak_unique,
+               CHI_C_peak_unique = CHI_C_peak_unique, trios_peak_intersect = trios_peak_intersect,
+               CHI_C_peak_intersect = CHI_C_peak_intersect) -> df_final
+    intersected_peaks = max(trios_peak_intersect, CHI_C_peak_intersect)
+    A = intersected_peaks+trios_peak_unique
+    B = intersected_peaks+CHI_C_peak_unique
+    N = nrow(all_gene_peaks_linkage)
+    k = intersected_peaks
+    p_value <- phyper(k - 1, A, N - A, B, lower.tail = FALSE)
+    df_final %>% mutate(p_value = p_value) -> df_final
+  }) -> gene_peak_linkage_hypergeometric_test_shuffled
+gene_peak_linkage_hypergeometric_test_shuffled %>% do.call(rbind, .) -> gene_peak_linkage_hypergeometric_test_df_shuffled
+dim(gene_peak_linkage_hypergeometric_test_df_shuffled)
+gene_peak_linkage_hypergeometric_test_df_shuffled$p_value %>% hist() %>% plot()
+
+gene_peak_linkage_hypergeometric_test_df %>% 
+  mutate(p_value = case_when(
+    p_value == 0 ~ .Machine$double.eps, 
+    TRUE ~ p_value
+  )) %>% mutate(group = "TRIPOD vs CHI-C") %>% 
+  dplyr::filter(p_value < 0.05) %>% 
+  {
+    gene_ = .$gene
+    gene_peak_linkage_hypergeometric_test_df_shuffled[gene_, ] %>% 
+      mutate(p_value = case_when(
+        p_value == 0 ~ .Machine$double.eps, 
+        TRUE ~ p_value
+      )) %>% mutate(group = "TRIPOD vs CHI-C") %>% 
+      mutate(p_value = -log(p_value, 10)) %>% 
+      ggplot(aes(x = p_value)) + 
+      geom_histogram(binwidth = 0.5, color = "black") + 
+      xlab("Hypergeometric test -log10(p-value)") + 
+      ggtitle("4241 sig. genes") + 
+      theme_classic()
+  } -> p1
+
+library(ggbreak)
+rbind(
+p$data %>% mutate(group = "TRIPOD predicted peaks") %>% dplyr::select(p_value, group),
+p1$data %>% mutate(group = "random shuffled peaks") %>% dplyr::select(p_value, group)
+) %>% 
+  {
+    dat_ = .
+    ggplot() + 
+#      geom_histogram(data=subset(dat_, group == "TRIPOD predicted peaks"), aes(x = p_value, y = ..count..), binwidth = 0.5, color = "#619CFF", fill = "#619CFF") + 
+#      geom_histogram(data=subset(dat_, group == "random shuffled peaks"), aes(x = p_value, y = -..count..), binwidth = 0.5, color = "#00BA38", fill = "#00BA38") + 
+      geom_histogram(data=subset(dat_, group == "TRIPOD predicted peaks"), aes(x = p_value, y = ..count.., fill = "TRIPOD peaks"), binwidth = 0.5) + 
+      geom_histogram(data=subset(dat_, group == "random shuffled peaks"), aes(x = p_value, y = -..count.., fill = "Random peaks"), binwidth = 0.5) + 
+      scale_y_continuous(breaks = seq(-4000, 300, 100)) + 
+      scale_x_continuous(limits = c(-1, 100)) + 
+      scale_y_break(c(-3800, -200), scales = 10) + 
+      scale_fill_manual(values = c("TRIPOD peaks" = "#619CFF", "Random peaks" = "#00BA38"), breaks = c("TRIPOD peaks", "Random peaks")) +
+      labs(fill = "Group") + 
+      theme_classic() + 
+      theme(legend.position = "top") + 
+      xlab("Hypergeometric test -log10(p-value)") + 
+      ggtitle("4241 sig. genes")
+  }
+
+p$data %>% head()
+p1$data %>% head()
+
+list(
+  TRIPOD = p$data,
+  random = p1$data
+) %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    df_ = x
+    df_ %>% dplyr::select(gene, p_value) %>% 
+      "colnames<-"(., c("gene", "-log10_P")) -> df_
+    df_[["group"]] <- y
+    df_
+  }) %>% do.call(rbind, .) %>% 
+  dplyr::arrange(gene) %>% 
+  "rownames<-"(., 1:nrow(.)) -> df_hypergeometric_test
+
+write.csv(df_hypergeometric_test, file = "~/Downloads/hypergeometric_test_df.csv", row.names = FALSE, quote = FALSE)
+
+pvals=read.csv('~/Downloads/hypergeometric_test_df.csv')
+tripod.p=10^(-pvals$X.log10_P[pvals$group=='TRIPOD'])
+random.p=10^(-pvals$X.log10_P[pvals$group=='random'])
+
+tripod.p=pmin(70, (pvals$X.log10_P[pvals$group=='TRIPOD']))
+random.p=(pvals$X.log10_P[pvals$group=='random'])
+
+pdf(file='pval.pdf', width=5, height=4) #Fig 5E
+hist(tripod.p, breaks=seq(0,70,2), col=adjustcolor("#E69F00", alpha.f=0.7), xlab='-log(p)', main='Distribution of -log(p) \nfrom hypergeometric test')
+hist(random.p, add=TRUE, breaks=seq(0,70,2), col=adjustcolor("#999999", alpha.f = 0.7))
+legend('topright', fill=c(adjustcolor("#999999", alpha.f=0.7), adjustcolor("#E69F00", alpha.f = 0.7)),
+       legend = c('Random peaks', 'TRIPOD peaks'), bty='n')
+dev.off()
+
+
+hist(random.p,  breaks=seq(0,70,2), col=adjustcolor("#999999", alpha.f = 0.7))
+
+#Plot ChIP-seq validation
+
+load("~/Dropbox/singulomics/github_rda/TRIPOD/list_GSE39977_peak.RData")
+load(file='~/Dropbox/singulomics/github_rda/TRIPOD/metacell.peak.rda')
+
+colnames(metacell.peak) %>% 
+  {
+    peak_ = .
+    chr = gsub("(chr.+?)-(\\d+?)-(\\d+)", "\\1", peak_)
+    start = gsub("(chr.+?)-(\\d+?)-(\\d+)", "\\2", peak_) %>% as.integer()
+    end = gsub("(chr.+?)-(\\d+?)-(\\d+)", "\\3", peak_) %>% as.integer()
+    GenomicRanges::GRanges(seqnames = chr, ranges = IRanges::IRanges(start = start, end = end))
+  } -> df_all_peaks
+
+list_GSE39977_peak_df_mm10 %>% 
+#  .[1] %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    model_ = y
+    TF_ = gsub("(^.+?)_.+", "\\1", model_)
+    paste0(toupper(substr(TF_, 1, 1)), tolower(substr(TF_, 2, nchar(TF_)))) -> TF_
+    if (TF_ == "Bmal1"){
+      TF_ = "Arntl"
+    }else{
+      TF_ = TF_
+    }
+    x %>% 
+#      .[1] %>% 
+      map2(.x=.,.y=names(.),.f=function(x,y){
+        threshold_ = y
+        df_ = x
+        df_ %>% distinct() -> df_
+        GenomicRanges::GRanges(seqnames = df_[,1], ranges = IRanges::IRanges(start = df_[,2], end = df_[,3])) -> df_ChIP
+        
+        trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD" & TF == TF_) %>% 
+          .$peak %>% unique() %>% 
+          {
+            peak_ = .
+            print(peak_[1:3])
+            chr = gsub("(chr.+?)-(\\d+?)-(\\d+)", "\\1", peak_)
+            start = gsub("(chr.+?)-(\\d+?)-(\\d+)", "\\2", peak_) %>% as.integer()
+            end = gsub("(chr.+?)-(\\d+?)-(\\d+)", "\\3", peak_) %>% as.integer()
+#            data.frame(chr, start, end)[1:3, ]
+            GenomicRanges::GRanges(seqnames = chr, ranges = IRanges::IRanges(start = start, end = end))
+          } -> df_Trios
+        
+        set.seed(123)
+        df_all_peaks[sample(1:length(df_all_peaks), nrow(df_Trios %>% as.data.frame()), replace = F), ] -> df_all_peaks_sampled
+        
+        c(0, 500, 1000, 1500, 2000) %>% 
+          "names<-"(., sprintf("gap_%s", .)) %>% 
+#          .[1] %>% 
+          map(function(x){
+            gap_ = x
+            ChIPpeakAnno::findOverlapsOfPeaks(df_ChIP, df_all_peaks, maxgap = gap_) -> ol_all_peaks
+            ChIPpeakAnno::findOverlapsOfPeaks(df_ChIP, df_all_peaks_sampled, maxgap = gap_) -> ol_all_peaks_sampled
+            ChIPpeakAnno::findOverlapsOfPeaks(df_ChIP, df_Trios, maxgap = gap_) -> ol
+            
+            ol_all_peaks$venn_cnt -> venn_cnt_all_peaks
+            ol_all_peaks_sampled$venn_cnt -> venn_cnt_all_peaks_sampled
+            ol$venn_cnt -> venn_cnt
+            total_ChIP_peak = venn_cnt[,4] %>% sum()
+            total_Trios_peak = venn_cnt[,5] %>% sum()
+            Trios_unique = venn_cnt[2,5]
+            Trios_intersect = venn_cnt[4,5]
+            total_all_peaks = venn_cnt_all_peaks[,5] %>% sum()
+            all_peaks_intersect = venn_cnt_all_peaks[4,5]
+            total_sampled_peaks = venn_cnt_all_peaks_sampled[,5] %>% sum()
+            sampled_peaks_intersect = venn_cnt_all_peaks_sampled[4,5]
+            data.frame(
+              model = model_,
+              TF = TF_,
+              macs2_threshold = threshold_,
+              max_gap = gap_,
+              total_ChIP_peak = total_ChIP_peak,
+              total_Trios_peak = total_Trios_peak,
+              Trios_unique = Trios_unique,
+              Trios_intersect = Trios_intersect, 
+              total_all_peaks = total_all_peaks, 
+              all_peaks_intersect = all_peaks_intersect,
+              total_sampled_peaks = total_sampled_peaks,
+              sampled_peaks_intersect = sampled_peaks_intersect
+              )
+          }) %>% do.call(rbind, .)
+      }) %>% do.call(rbind, .)
+  }) %>% do.call(rbind, .) -> venn_list_df_
+
+venn_list_df_ %>% filter(macs2_threshold == "q_0.1" & max_gap == 1000) %>% 
+  filter(!grepl("cycle|BMAL1_ChIP", model)) %>% 
+  mutate(
+    Trios = Trios_intersect / total_Trios_peak,
+    All_peaks = all_peaks_intersect / total_all_peaks,
+    Sampled_peaks = sampled_peaks_intersect / total_sampled_peaks
+  ) %>% 
+  dplyr::select(TF, Trios, All_peaks, Sampled_peaks) %>%
+  pivot_longer(cols = -TF, names_to = "group", values_to = "ratio") %>% 
+  ggplot(aes(x = TF, y = ratio, fill = group)) + 
+#  geom_bar(stat = "identity", width = 0.7) + 
+  geom_bar(stat = "identity", position = "dodge", width = 0.5) +
+  theme_classic() + 
+  theme(legend.position = "top") +
+  ylab("Fraction of peaks overlapping with ChIP-seq peaks") #Fig 5E
