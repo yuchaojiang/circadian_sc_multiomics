@@ -973,3 +973,1096 @@ pairs(toplot, lower.panel = function(x,y){smoothScatter(x,y,add=TRUE)}, upper.pa
 dev.off()
 
 ####
+
+# 17. Validation mouse SCN ----
+
+#Generate the expression matrix
+list.files("~/Dropbox/singulomics/github_rda/GSE117295_RAW_Mouse_SCN", pattern = "\\.csv", full.names = T) %>% 
+  {.[grep("CT", .)]} %>% 
+  gtools::mixedsort() -> files_
+
+ZT_list = list()
+files_ %>% 
+  {
+    files_ = .
+    seq(14,58,4) %>% sprintf("CT%s", .) %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        CT_ = x
+        files_ %>% {.[grepl(CT_, .)]} -> file_
+        print(file_)
+        read.csv(file_, header = T, stringsAsFactors = F) -> dat_
+        colnames(dat_) ->> ZT_list[[CT_]]
+        dat_ %>% rownames_to_column("Gene") -> dat_
+      }) %>% purrr::reduce(., full_join, by = "Gene") %>% 
+      column_to_rownames("Gene") %>% 
+      dplyr::mutate(across(everything(), ~ replace_na(., 0))) -> dat_
+    dat_
+  } -> dat_
+
+save(dat_, file = "~/Dropbox/singulomics/github_rda/GSE117295_RAW_Mouse_SCN/exprssion_matrix.rda")
+
+#Generate the seurat object 
+sc = Seurat::CreateSeuratObject(counts = dat_, project = "GSE117295_RAW_Mouse_SCN", assay = "RNA")
+##remove cells with duplicate barcodes
+colnames(sc) %>% {.[grepl("\\.x|\\.y", .)]} -> duplicated_barcode
+barcode_kept = setdiff(colnames(sc), duplicated_barcode)
+sc = sc[,barcode_kept]
+
+#Generate celltype metadata
+read.table("~/Dropbox/singulomics/github_rda/GSE117295_RAW_Mouse_SCN/cluster_vs_barcode/all_cell_cluster_cell_barcode.tsv", 
+           header =T, sep = "\t", stringsAsFactors = F) %>% as_tibble() -> barcode_df
+ZT_list %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    CT_ = y
+    barcode_ = x
+    barcode_ %>% 
+      as_tibble() %>% 
+      "colnames<-"(., "barcode") %>% 
+      dplyr::mutate(CT = CT_)
+  }) %>% do.call(rbind, .) %>% 
+  left_join(x = barcode_df, y = ., by = "barcode") -> meta_df
+
+save(meta_df, file = "~/Dropbox/singulomics/github_rda/GSE117295_RAW_Mouse_SCN/metadata.rda")
+
+##further filter sc
+sc@meta.data %>% 
+  rownames_to_column("barcode") %>% 
+  left_join(x =. , y = meta_df, by = "barcode") %>% 
+  .$barcode %>% table() %>% {.[. > 1]} %>% names() -> duplicated_barcode
+sc = sc[,setdiff(colnames(sc), duplicated_barcode)]
+
+sc@meta.data %>% 
+  rownames_to_column("barcode") %>% 
+  left_join(x =. , y = meta_df, by = "barcode") %>% 
+  column_to_rownames("barcode") -> sc@meta.data
+
+sc@meta.data %>% dplyr::filter(is.na(cell_type)) %>% rownames() -> non_annotaed_barcode
+sc = sc[,setdiff(colnames(sc), non_annotaed_barcode)]
+save(sc, file = "~/Dropbox/singulomics/github_rda/GSE117295_RAW_Mouse_SCN/seurat_object.rda")
+
+sc <- SCTransform(sc, verbose = FALSE, return.only.var.genes = FALSE) %>% RunPCA() %>% RunUMAP(dims = 1:50, reduction.name = 'umap.rna', reduction.key = 'rnaUMAP_')
+p1 <- DimPlot(sc, reduction = "umap.rna", group.by='cell_type', label = TRUE, label.size = 2.5, repel = TRUE) + ggtitle("10X sc RNA")  #Supp Fig 15A
+
+sc@meta.data %>% dplyr::mutate(celltype = case_when(
+  grepl("Neurons", cell_type) ~ "Neurons",
+  TRUE ~ cell_type
+)) -> sc@meta.data
+sc$celltype %>% table()
+
+# Generate RNA expression matrix
+sc@assays$RNA@counts %>% 
+  as.data.frame() %>% 
+  dplyr::mutate(across(everything(), function(x){(x/sum(x))*median(sc$nCount_RNA)})) -> RNA_norm
+
+# 5 pseudo bulk (random sampling)
+c("Neurons1", "Ependymocytes") %>% 
+  "names<-"(.,.) %>% 
+#  .[1] %>% 
+  map(function(x){
+    celltype_ = x
+    print(celltype_)
+    sc@meta.data %>% dplyr::filter(cell_type == celltype_) -> meta_df
+    seq(14,58,4) %>% sprintf("CT%s", .) %>% 
+      "names<-"(.,.) %>% 
+#      .[1:2] %>% 
+      map(function(x){
+        set.seed(123)
+        CT_ = x
+        meta_df %>% dplyr::filter(CT == CT_) %>% 
+          dplyr::mutate(group = sample(1:5, nrow(.), replace = T)) -> meta_df
+        c(1:5) %>% 
+          map(function(x){
+            i = x
+            meta_df %>% dplyr::filter(group == i) -> meta_df_
+            barcode = rownames(meta_df_)
+            RNA_norm[,barcode] -> RNA_norm
+            rowMeans(RNA_norm) %>% 
+              as.data.frame() %>% 
+              "colnames<-"(., sprintf("%s_REP%s", CT_, i)) -> RNA_nrom
+          }) %>% do.call(cbind, .) -> RNA_norm
+#        head(RNA_norm)
+      }) %>% do.call(cbind, .) %>% 
+      "colnames<-"(., gsub("^CT\\d+\\.CT", "ZT", colnames(.))) -> RNA_norm
+#    head(RNA_norm)
+  }) -> list_RNA_norm
+
+c("Neurons1", "Ependymocytes") %>% 
+  "names<-"(.,.) %>% 
+  #  .[1] %>% 
+  map(function(x){
+    celltype_ = x
+    print(celltype_)
+    sc@meta.data %>% dplyr::filter(cell_type == celltype_) -> meta_df
+    seq(14,58,4) %>% sprintf("CT%s", .) %>% 
+      "names<-"(.,.) %>% 
+      #      .[1:2] %>% 
+      map(function(x){
+        set.seed(123)
+        CT_ = x
+        meta_df %>% dplyr::filter(CT == CT_) %>% 
+          dplyr::mutate(group = sample(1:5, nrow(.), replace = T)) -> meta_df
+        c(1:5) %>% 
+          map(function(x){
+            i = x
+            meta_df %>% dplyr::filter(group == i) -> meta_df_
+            barcode = rownames(meta_df_)
+            RNA_norm[,barcode] -> RNA_norm
+#            rowMeans(RNA_norm) %>% 
+            apply(RNA_norm, 1, function(x){sum(x != 0)/length(x)}) %>% 
+              as.data.frame() %>% 
+              "colnames<-"(., sprintf("%s_REP%s", CT_, i)) -> RNA_non_zero
+          }) %>% do.call(cbind, .) -> RNA_non_zero
+        #        head(RNA_norm)
+      }) %>% do.call(cbind, .) %>% 
+      "colnames<-"(., gsub("^CT\\d+\\.CT", "ZT", colnames(.))) -> RNA_non_zero
+    #    head(RNA_norm)
+  }) -> list_non_zero_prop
+
+# Calculate gene rhythmicity (Mean and non zero proportion)
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+list_RNA_norm %>% 
+  map(function(x){
+    df_ = x 
+    gene_ = rownames(df_)
+    df_ = df_ %>% as_tibble()
+    timepoints_ = colnames(df_) %>% gsub("ZT(\\d+)_.+", "\\1", .) %>% as.integer()
+    res_ = cyclic_HMP(timepoints = timepoints, gene = gene_, exp_matrix = df_)
+  }) -> list_RNA_norm_pval
+list_RNA_norm_pval %>% 
+  map(function(x){
+    #    class(x)
+    df_ = x
+    df_ %>% dplyr::select(!matches("LS|meta2d")) -> df_
+    recal_cauchy_p_and_hmp(df_) -> df_
+  }) -> list_RNA_norm_pval
+
+list_non_zero_prop %>% 
+  map(function(x){
+    df_ = x 
+    gene_ = rownames(df_)
+    df_ = df_ %>% as_tibble()
+    timepoints_ = colnames(df_) %>% gsub("ZT(\\d+)_.+", "\\1", .) %>% as.integer()
+    res_ = cyclic_HMP(timepoints = timepoints, gene = gene_, exp_matrix = df_)
+  }) -> list_non_zero_prop_pval
+list_non_zero_prop_pval %>% 
+  map(function(x){
+#    class(x)
+    df_ = x
+    df_ %>% dplyr::select(!matches("LS|meta2d")) -> df_
+    recal_cauchy_p_and_hmp(df_) -> df_
+  }) -> list_non_zero_prop_pval
+
+# Genome-wide comparision (pvalues, phase and amplitude)
+#5 Genomewide comparison 
+data.frame(
+  Mean = list_RNA_norm_pval$Neurons1$cauchy_BH.Q,
+  Nonzero = list_non_zero_prop_pval$Neurons1$cauchy_BH.Q
+) %>% dplyr::filter((!is.na(Mean))|(!is.na(Nonzero))) %>% 
+  {-log(., 10)} %>% 
+  {
+    df_ = .
+    cor_ = cor(df_$Mean, df_$Nonzero, method = "pearson")
+    df_ %>% 
+    ggplot(aes(x = Mean, y = Nonzero)) + 
+#      geom_point(size = 0.1) + 
+      geom_hex(bins = 100) + 
+      scale_fill_continuous(trans = 'log', name = "Count (log scale)") +
+      annotate("text", x = 1, y = 10, label = sprintf("cor = %.2f", cor_)) + 
+      xlab("-log10(p.adj):mean") + 
+      ylab("-log10(p.adj):nonzero prop.") -> p
+    
+    xintercept_ = df_$Mean %>% median(., na.rm = T)
+    yintercept_ = df_$Nonzero %>% median(., na.rm = T)
+    
+    p + geom_vline(xintercept = xintercept_, linetype = "dashed", color = "red") + 
+      geom_hline(yintercept = yintercept_, linetype = "dashed", color = "red") -> p
+    p + theme_classic()
+  } -> p1
+
+data.frame(
+  Mean = list_RNA_norm_pval$Neurons1$HR_phi,
+  Nonzero = list_non_zero_prop_pval$Neurons1$HR_phi
+) %>% dplyr::filter((!is.na(Mean))|(!is.na(Nonzero))) %>% 
+  dplyr::mutate(across(everything(), function(x){(x/(2*pi))*24})) %>% 
+  dplyr::mutate(Nonzero = case_when(
+#    Mean - Nonzero > 12 ~ Nonzero+24,
+#    Mean - Nonzero < -12 ~ Nonzero-24,
+    Nonzero - Mean > 12 ~ Nonzero - 24,
+    TRUE ~ Nonzero
+  )) %>% 
+  dplyr::mutate(Mean = case_when(
+    Nonzero - Mean < -12 ~ Mean - 24, 
+    TRUE ~ Mean
+  )) %>% 
+  {
+    df_ = .
+    print(nrow(df_))
+    cor_ = cor(df_$Mean, df_$Nonzero, method = "pearson")
+    df_ %>%
+      ggplot(aes(x = Mean, y = Nonzero)) + 
+      geom_hex(bins = 100) + 
+      scale_fill_continuous(trans = 'log', name = "Count (log scale)") +
+      geom_abline(intercept = 0, slope = 1, color = "red") + 
+      annotate("text", x = 2, y = 24, label = sprintf("cor = %.2f", cor_)) + 
+      ylab("Adjusted phase: nonzero prop.") + 
+      xlab("Adjusted phase: mean") + 
+      theme_classic() + 
+      scale_x_continuous(breaks = seq(-10, 20, 5)) +
+      scale_y_continuous(breaks = seq(-10, 20, 5))
+  } -> p2
+
+data.frame(
+  Mean = list_RNA_norm_pval$Neurons1$MetaCycle_JTK_amplitude,
+  Nonzero = list_non_zero_prop_pval$Neurons1$MetaCycle_JTK_amplitude
+) %>% dplyr::filter((!is.na(Mean))|(!is.na(Nonzero))) %>% 
+  {log(.)} %>% 
+  dplyr::filter((is.finite(Mean))&(is.finite(Nonzero))) %>% 
+  {
+    df_ = .
+#    df_ = df_ %>% dplyr::filter(Nonzero > -30) -> df_
+    df_ = df_ %>% dplyr::filter(Nonzero > quantile(Nonzero, 0.01)) -> df_
+    print(nrow(df_))
+    cor_ = cor(df_$Mean, df_$Nonzero, method = "pearson")
+    cor_
+    df_ %>%
+      ggplot(aes(x = Mean, y = Nonzero)) + 
+      geom_hex(bins = 100) + 
+#      scale_fill_continuous(trans = 'log', name = "Count (log scale)") +
+#      geom_abline(intercept = 0, slope = 1, color = "red") + 
+      annotate("text", x = -12, y = -2.5, label = sprintf("cor = %.2f", cor_)) + 
+      ylab("log(amplitude): nonzero prop.") + 
+      xlab("log(amplitude): mean") + 
+      theme_classic()
+  } -> p3
+
+patchwork::wrap_plots(p1,p2,p3, ncol = 3) #Fig 3E
+
+#Venn diagram of cyclic genes (mean vs nonzero)
+list(
+  Mean = list_RNA_norm_pval$Neurons1 %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
+  Nonzero = list_non_zero_prop_pval$Neurons1 %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene
+) %>% 
+  ggvenn::ggvenn() #Supp Fig 15C
+
+list(
+  Mean = list_RNA_norm_pval$Ependymocytes %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
+  Nonzero = list_non_zero_prop_pval$Ependymocytes %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene
+) %>% 
+  ggvenn::ggvenn()
+
+#7. boxplot of mean and nonzero prop
+list(
+  Mean = list_RNA_norm_pval$Neurons1 %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
+  Nonzero = list_non_zero_prop_pval$Neurons1 %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene
+) %>% 
+  ggvenn::list_to_data_frame() %>% 
+  {
+    df_ = .
+    Mean = df_ %>% dplyr::filter((Mean==TRUE)&(Nonzero==FALSE)) %>% .$key
+    Nonzero = df_ %>% dplyr::filter((Mean==FALSE)&(Nonzero==TRUE)) %>% .$key
+    Overlapped = df_ %>% dplyr::filter((Mean==TRUE)&(Nonzero==TRUE)) %>% .$key
+    
+    list(Mean = Mean, Nonzero = Nonzero, Overlapped = Overlapped)
+  } -> list_genes_venn
+
+c("Neurons1", "Ependymocytes") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    celltype_ = x
+    list_val = list()
+    list_genes_venn %>% 
+      map2(.x=.,.y=names(.),.f=function(x,y){
+        gene_ = x
+        group_ = y
+        #    list_non_zero_prop$Neurons1[gene_, ] -> df_
+        list_non_zero_prop[[celltype_]][gene_, ] -> df_
+        unlist(df_) -> df_
+        df_ ->> list_val[[group_]]
+        df_ %>% 
+          as_tibble() %>% 
+          dplyr::mutate(group = group_)
+      }) %>% do.call(rbind, .) %>% 
+      {
+        df_ = .
+        df_ %>% dplyr::filter(group != "Overlapped") -> df_
+        
+        df_ %>% dplyr::filter(group == "Mean") %>% .$value %>% quantile(., 0.75) %>% .[[1]] %>% {. + 1} -> low_break
+        df_ %>% dplyr::filter(group == "Mean") %>% .$value %>% quantile(., 0.99) %>% .[[1]] -> up_break
+        print(low_break)
+        
+        df_ %>% 
+          #    dplyr::mutate(group = factor(group, levels = c("Mean", "Overlapped", "Nonzero"))) %>% 
+          dplyr::mutate(group = factor(group, levels = c("Mean", "Nonzero"))) %>% 
+          ggplot(aes(x = group, y = value, fill = group)) + 
+          geom_boxplot(width = 0.4) + 
+          scale_fill_manual(values = c(Mean="#56B4E9", Nonzero="#009E73")) + 
+          theme_classic() + 
+          xlab(NULL) + 
+          ylab("Non zero proportion") + 
+          theme(legend.position = "none") + 
+          scale_y_break(breaks = c(0.4,0.5), scale = 0.3) + 
+#          scale_y_break(breaks = c(low_break ,up_break), scale = 0.3) + 
+          ggtitle(celltype_)
+      } -> p1
+    print(t.test(list_val$Mean, list_val$Nonzero))
+    return(p1)
+  }) -> p1
+#p1$Neurons1+p1$Ependymocytes
+p1$Neurons1 #Supp Fig 15D
+
+
+c("Neurons1", "Ependymocytes") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    celltype_ = x
+list_val = list()
+list_genes_venn %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    gene_ = x
+    group_ = y
+    list_RNA_norm[[celltype_]][gene_, ] -> df_
+    unlist(df_) -> df_
+    df_ ->> list_val[[group_]]
+    df_ %>% 
+      as_tibble() %>% 
+      dplyr::mutate(group = group_)
+  }) %>% do.call(rbind, .) %>% 
+  {
+    df_ = .
+    print(median(df_$value))
+    df_ %>% dplyr::filter(group != "Overlapped") -> df_
+    df_ %>% dplyr::filter(group == "Mean") %>% .$value %>% quantile(., 0.75) %>% .[[1]] %>% {. + 1} -> low_break
+    df_ %>% dplyr::filter(group == "Mean") %>% .$value %>% quantile(., 0.99) %>% .[[1]] -> up_break
+    sprintf("low_break: %f, up_break: %f", low_break, up_break) %>% print()
+    df_ %>% 
+#      dplyr::mutate(group = factor(group, levels = c("Mean", "Overlapped", "Nonzero"))) %>% 
+      dplyr::mutate(group = factor(group, levels = c("Mean", "Nonzero"))) %>% 
+      ggplot(aes(x = group, y = value, fill = group)) + 
+      geom_boxplot(width = 0.4) + 
+      scale_fill_manual(values = c(Mean="#56B4E9", Nonzero="#009E73")) + 
+      theme_classic() + 
+      xlab(NULL) + 
+      ylab("Normalized expression") + 
+      theme(legend.position = "none") + 
+#      scale_y_break(breaks = c(0.3,9), scale = 0.3) + 
+      scale_y_break(breaks = c(0.25, up_break), scale = 0.3) + 
+      ggtitle(celltype_)
+  } -> p2
+print(t.test(list_val$Mean, list_val$Nonzero))
+return(p2)
+}) -> p2
+#p2$Neurons1+p2$Ependymocytes
+p2$Neurons1 #Supp Fig 15D
+
+# 18. Validation drosophila brain ----
+library(tidyverse)
+library(Seurat)
+
+#Load data
+list.files("~/Dropbox/singulomics/github_rda/GSE157504_RAW", pattern = "csv", full.names = T) %>% 
+  map(function(x){
+    read.csv(file = x, header = T, sep = ",", stringsAsFactors = F) -> df_
+  }) -> df_list
+
+purrr::reduce(df_list, full_join, by = "X") -> df_rna_all
+df_rna_all %>% column_to_rownames(var = "X") %>% 
+  as.data.frame() -> df_rna_all
+rm(df_list)
+gc()
+
+df_rna_all %>% replace(is.na(.), 0) -> df_rna_all
+
+CreateSeuratObject(counts = df_rna_all, project = "drosophila_scRNA", assay = "RNA") -> scRNA_obj
+rm(df_rna_all)
+
+sc = scRNA_obj
+rm(scRNA_obj)
+
+colnames(sc)
+
+sc@meta.data %>% mutate(AR = gsub(pattern = ".+(AR\\d+?)_.+", replacement = "\\1", x = rownames(.))) -> sc@meta.data
+sc@meta.data %>% rownames() %>% gsub(pattern = "^.+?_.+?_((.+?)_.+?)_.+", replace = "\\2", x = .) -> sc@meta.data$experimental_design
+sc@meta.data %>% rownames() %>% gsub(pattern = "^.+?_.+?_((.+?)_(.+?))_.+", replace = "\\3", x = .) -> sc@meta.data$time
+sc@meta.data %>% rownames() %>% gsub(pattern = "^X(.+?)_.+", replace = "\\1", x = .) -> sc@meta.data$date
+sc@meta.data <- sc@meta.data %>% mutate(orig.ident = "scRNA_drosophila")
+
+f.entropy <- function( m.in ){
+  m.in <- apply( m.in, 2, function( x ){ x / sum(x, na.rm=T ); } );
+  v.entropy <- apply( m.in, 2, function(x){ y <- unname(x); y <- y[ y > 0 ]; sum( -y * log(y) ); } );
+  return( v.entropy );
+}
+
+sc@meta.data$entropy = f.entropy(sc@assays$RNA@counts)
+
+sc_QC <- subset(
+  x = sc,
+  subset = nCount_RNA < 75000 &
+    nCount_RNA > 6000 &
+    nFeature_RNA < 6000 &
+    nFeature_RNA > 1000 &
+    entropy > 5.5
+)
+
+sc = sc_QC
+rm(sc_QC)
+
+sc@meta.data$log2nCount_RNA <- log2(sc@meta.data$nCount_RNA+1)
+sc@meta.data$log2nFeature_RNA <- log2(sc@meta.data$nFeature_RNA+1)
+
+library(gtools)
+#structure containing information about data
+l.info <- list();
+
+#compute genes not to be used in clustering
+l.info[["geneSets"]][["mt"]] <- v.mt.genes <- grep("^mt:", rownames(sc@assays$RNA@data), value=T, ignore.case=T)
+l.info[["geneSets"]][["rpls"]] <- v.ribo.genes <- grep("^rp[ls]", rownames(sc@assays$RNA@data), value=T, ignore.case=T)
+l.info[["geneSets"]][["rRNA"]] <- v.rRNA.genes <- grep("rRNA", rownames(sc@assays$RNA@data), value=T, ignore.case=T)
+l.info[["geneSets"]][["tRNA"]] <- v.tRNA.genes <- grep("tRNA", rownames(sc@assays$RNA@data), value=T, ignore.case=T)
+l.info[["geneSets"]][["ERCC"]] <- v.ercc.genes <- grep("^ERCC", rownames(sc@assays$RNA@data), value=T, ignore.case=F)
+l.info[["geneSets"]][["exclude"]] <- v.genes.exclude <- mixedsort(unique(c(v.mt.genes, v.ribo.genes, v.rRNA.genes, v.tRNA.genes, v.ercc.genes, "EGFP")))
+
+cat( "length( v.genes.exclude ) = ", length( v.genes.exclude ), "\n" )
+#length( v.genes.exclude ) =  472 
+
+write(v.genes.exclude, file="~/Dropbox/singulomics/github_rda/GSE157504_RAW/gene.exclude.txt")
+
+sc@meta.data %>% mutate(experiment = sprintf("%s_%s", experimental_design, time)) -> sc@meta.data
+
+v.experiments <- unique(sc@meta.data$experiment)
+cat( "v.experiments:", v.experiments, "\n" );
+
+for (experiment in v.experiments){
+  l.info[["nCells_condition"]][[experiment]] <- sum(sc@meta.data$experiment == experiment)
+}
+print( l.info )
+
+#Data integration
+l.info$geneSets$exclude -> v.var.genes.exclude
+
+sc = PercentageFeatureSet(sc, pattern = "^mt:", col.name = "percent.mito")
+
+sc_splited <- SplitObject(sc, split.by = "experiment")
+
+for (i in 1:length(sc_splited)){
+  sc_splited[[i]] <- SCTransform(sc_splited[[i]], 
+                                 vars.to.regress = c("date", "nCount_RNA", "nFeature_RNA", "percent.mito"),
+                                 assay="RNA", verbose = TRUE, return.only.var.genes = FALSE, variable.features.n = 3000)
+  sc_splited[[i]]@assays$SCT@var.features <- setdiff(sc_splited[[i]]@assays$SCT@var.features, v.var.genes.exclude)
+}
+
+v.common <- rownames(sc_splited[[1]]$SCT@data)
+for (i in 1:length(sc_splited)){
+  if (i == 1){
+    print(sprintf("condtion %s number of gene in SCT matrix: %s", i, length(v.common))) 
+  }else{
+    v.common <- intersect(v.common, rownames(sc_splited[[i]]$SCT@data))
+    print(sprintf("condtion %s number of gene in SCT matrix: %s", i, length(rownames(sc_splited[[i]]$SCT@data))))
+  }
+} 
+length(v.common)
+cat("length(v.common)=", length(v.common), "\n")
+
+v.inte.features <- vector()
+if (1){                                     # find variable features/genes common to all
+  v.var.common <- sc_splited[[1]]@assays$SCT@var.features
+  print(sprintf("condition %s number of SCT var.features: %s", 1, length(v.var.common)))
+  for (i in 2:length(sc_splited)){
+    v.var.common <- c(v.var.common, sc_splited[[i]]@assays$SCT@var.features)
+    print(sprintf("condition %s number of SCT var.features: %s", i, length(sc_splited[[i]]@assays$SCT@var.features)))
+  }
+  length(unique(v.var.common))
+  v.var.common <- names(which(table(v.var.common) == length(sc_splited)))
+  # v.var.common <- names( which( table( v.var.common ) == 8 ) ); # Change this just for integration LD and DD
+  
+  cat("length(v.var.common)=", length(v.var.common), "\n")
+  v.var.common <- setdiff(v.var.common, v.var.genes.exclude)
+  length(v.var.common)
+  print("After excluding v.var.genes.exclude:")
+  cat("length(v.var.common)=", length(v.var.common), "\n")
+  v.inte.features <- v.var.common
+} else {
+  v.inte.features <- SelectIntegrationFeatures(object.list = sc_splited, nfeatures = 3000)
+}
+
+nDims = 50
+k.anchor.use = 5
+k.filter.use = 199
+k.score.use = 30
+k.weight.use = 100
+sc_splited.anchors <- FindIntegrationAnchors(object.list = sc_splited, 
+                                             dims = 1:nDims, 
+                                             assay=rep( "SCT", length(sc_splited)),
+                                             anchor.features=v.inte.features, 
+                                             k.anchor=k.anchor.use,
+                                             k.filter=k.filter.use,
+                                             k.score=k.score.use, verbose=T )
+
+sc_integrated <- IntegrateData(anchorset = sc_splited.anchors, dims = 1:nDims, 
+                               features.to.integrate=v.common, k.weight = k.weight.use, verbose = T)
+VariableFeatures(sc_integrated, assay="integrated") <- v.inte.features
+
+DefaultAssay(sc_integrated) <- "integrated"
+
+sc_integrated <- ScaleData(sc_integrated, verbose=TRUE, assay="integrated", features=rownames(sc_integrated$integrated@data))
+sc_integrated <- RunPCA(sc_integrated, assay="integrated", npcs = nDims, verbose = FALSE, reduction.name = "rna_integrated_pca", 
+                        reduction.key = "rnaintegratedpc_"); cat( "RunPCA done\n" )
+sc_integrated <- RunTSNE(sc_integrated, reduction = "rna_integrated_pca",
+                         reduction.name = "rna_integrated_tsne", 
+                         reduction.key = "rna_integrated_tSNE_", 
+                         dims = 1:nDims ); cat( "RunTSNE done\n" )
+sc_integrated <- FindNeighbors(sc_integrated, assay="integrated", reduction = "rna_integrated_pca", dims = 1:nDims, force.recalc=T)
+sc_integrated <- FindClusters(sc_integrated, assay="integrated", resolution = 1.0 )
+
+rm(sc_splited.anchors, sc_splited)
+gc()
+
+DimPlot(sc_integrated, group.by = "seurat_clusters", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + ggtitle("scRNA-seq") -> p1
+DimPlot(sc_integrated, group.by = "experiment", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + ggtitle("scRNA-seq") -> p2
+p1|p2
+
+sc_integrated$seurat_clusters -> sc_integrated$integrated_cluster
+
+#Cluster annotation 
+DefaultAssay(sc_integrated) <- "SCT"
+DimPlot(sc_integrated, group.by = "seurat_clusters", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + ggtitle("scRNA-seq") -> p1
+
+
+#Use new annotation
+read.csv("~/Dropbox/singulomics/github_rda/clock_neurons_annotation.csv", head = T) -> df_anno
+
+#filter DD cells
+sc_integrated_tmp = sc_integrated
+sc_integrated_tmp@meta.data %>% filter(grepl("LD", experiment)) %>% .$experiment %>% table()
+sc_integrated_tmp@meta.data %>% filter(grepl("LD", experiment)) %>% rownames() %>% {sc_integrated_tmp[,.]} -> sc_integrated_tmp
+sc_integrated_tmp@meta.data -> meta.data
+sc_integrated_tmp@meta.data %>% rownames_to_column("X") %>% 
+  {
+    sc_meta = .
+    df_anno %>% dplyr::mutate(X = sprintf("X%s", X) %>% toupper()) %>% 
+      distinct() -> df_anno
+    
+    intersect(sc_meta$X, df_anno$X) %>% length() %>% print()
+    
+    left_join(sc_meta, df_anno, by = "X") %>% 
+      column_to_rownames("X")
+  } -> sc_integrated_tmp@meta.data
+sc_integrated_tmp@meta.data %>% dplyr::mutate(celltype = gsub("\\d+:(.+)", "\\1", Idents)) -> sc_integrated_tmp@meta.data
+DimPlot(sc_integrated_tmp, group.by = "Idents", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + ggtitle("scRNA-seq")
+DimPlot(sc_integrated_tmp, group.by = "celltype", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + ggtitle("scRNA-seq")
+rm(sc_integrated_tmp)
+
+df_anno$X %>% sprintf("X%s", .) %>% toupper() -> cell_sele
+
+sc_integrated[, cell_sele] -> sc_integrated_1
+DefaultAssay(sc_integrated_1) <- "integrated"
+sc_integrated_1 <- FindNeighbors(sc_integrated_1, assay="integrated", reduction = "rna_integrated_pca", dims = 1:nDims, force.recalc=T)
+sc_integrated_1 <- FindClusters(sc_integrated_1, resolution = 1.0, graph.name = "integrated_snn")
+
+list(
+sc_integrated_1@meta.data %>% rownames_to_column("cellname"), 
+df_anno %>% mutate(cellname = toupper(sprintf("X%s", X)), .after = 1) %>% 
+  .[,c(2,5,6)]
+) %>% purrr::reduce(., left_join, by = "cellname") %>% 
+  column_to_rownames("cellname") -> sc_integrated_1@meta.data
+
+DimPlot(sc_integrated_1, group.by = "seurat_clusters", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + ggtitle("scRNA-seq")
+DimPlot(sc_integrated_1, group.by = "Idents", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + 
+  theme(legend.position = "none") -> p1
+
+saveRDS(sc_integrated_1, "~/Dropbox/singulomics/github_rda/Drosophia_scRNAseq_sc_obj.rds")
+rm(list=ls())
+
+library(tidyverse)
+library(Seurat)
+
+readRDS("~/Dropbox/singulomics/github_rda/Drosophia_scRNAseq_sc_obj.rds") -> sc
+
+sc@meta.data %>% dplyr::mutate(celltype = gsub(".+:(.+)", "\\1", Idents)) -> sc@meta.data
+DimPlot(sc, group.by = "celltype", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + 
+  theme(legend.position = "none") -> p_tsne
+p_tsne + theme_classic() + theme(legend.position = "none") + 
+  ggtitle(NULL) -> p_tsne #Supp Fig 16A
+
+sc@assays$RNA@counts %>% 
+  as.data.frame() %>% 
+  mutate(across(everything(), function(x){(x/sum(x))*median(sc$nCount_RNA)})) %>% 
+  as.matrix() -> RNA_norm
+
+sc$Idents %>% unique() %>%
+  gtools::mixedsort() %>% 
+  "names<-"(., .) %>% 
+  map(function(x){
+    print(x)
+    sc@meta.data %>% 
+      rownames_to_column("cellname") %>%
+      filter(Idents == x) -> meta_
+    meta_$experiment %>% unique() %>% 
+      gtools::mixedsort() %>% "names<-"(.,.) -> exp_
+    exp_ %>%
+      map(function(x){
+        meta_ %>% filter(experiment == x) %>% .$cellname -> cell_sele
+        ZT_ = gsub(".+(ZT.+)", "\\1_REP%s", x) %>% {sprintf(., 1:length(cell_sele))}
+        length(cell_sele)
+        RNA_norm[,cell_sele] %>%
+          as.data.frame() %>%
+          "colnames<-"(., ZT_) -> RNA_norm
+      }) %>% purrr::reduce(., cbind) -> RNA_norm
+    RNA_norm %>% rownames_to_column("Gene") -> RNA_norm
+  }) ->RNA_norm_list
+
+##Circadian genes detection (mean and non zero proportion)
+RNA_norm_list %>% 
+#  .[1] %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    cluster_ = y
+    cluster_ %>% gsub("(\\d+):.+", "\\1", .) -> cluster_
+    df_ = x %>% column_to_rownames("Gene")
+    c("ZT02", "ZT06", "ZT10", "ZT14", "ZT18", "ZT22") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        ZT_ = x
+        df_ %>% dplyr::select(contains(ZT_)) -> df_
+        df_ %>% rowMeans() %>% 
+          as.data.frame() %>% 
+          "colnames<-"(., sprintf("%s_REP%s", ZT_, cluster_)) -> df_
+      }) %>% purrr::reduce(., cbind) -> df_
+  }) %>% purrr::reduce(., cbind) %>% 
+  {
+    df_ = .
+    colnames(df_) %>% gtools::mixedsort() -> colnames_
+    df_[, colnames_] -> df_
+    df_ %>% rownames_to_column("Gene")
+  } -> df_cyclic_neuron_mean
+
+names(RNA_norm_list) %>% 
+  {.[grepl("DN1p", .)]} %>% 
+  map(function(x){
+    cluster_ = x
+    RNA_norm_list[[cluster_]] %>% column_to_rownames("Gene") -> df_
+    c("ZT02", "ZT06", "ZT10", "ZT14", "ZT18", "ZT22") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        ZT_ = x
+        df_ %>% dplyr::select(contains(ZT_)) -> df_
+        df_ %>% rowMeans() %>% 
+          as.data.frame() %>% 
+          "colnames<-"(., sprintf("%s_REP%s", ZT_, cluster_)) -> df_
+      }) %>% purrr::reduce(., cbind) -> df_
+  }) %>% purrr::reduce(., cbind) %>% 
+  {
+    df_ = .
+    colnames(df_) %>% gtools::mixedsort() -> colnames_
+    df_[, colnames_] -> df_
+    df_ %>% rownames_to_column("Gene")
+  } %>% "colnames<-"(., gsub("(.+):.+", "\\1", colnames(.))) -> df_cyclic_neuron_mean_DN1p
+
+RNA_norm_list %>% 
+#    .[1] %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    cluster_ = y
+    cluster_ %>% gsub("(\\d+):.+", "\\1", .) -> cluster_
+    df_ = x %>% column_to_rownames("Gene")
+    c("ZT02", "ZT06", "ZT10", "ZT14", "ZT18", "ZT22") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        ZT_ = x
+        df_ %>% dplyr::select(contains(ZT_)) -> df_
+        n_total_cell = ncol(df_)
+        n_non_zero_cell = apply(df_, 1, function(x){sum(x!=0)})
+        n_non_zero_prop = n_non_zero_cell/n_total_cell
+        n_non_zero_prop %>% as.data.frame() %>% 
+          "colnames<-"(., sprintf("%s_REP%s", ZT_, cluster_)) -> df_
+      }) %>% purrr::reduce(., cbind) -> df_
+  }) %>% purrr::reduce(., cbind) %>% 
+  {
+    df_ = .
+    colnames(df_) %>% gtools::mixedsort() -> colnames_
+    df_[, colnames_] -> df_
+    df_ %>% rownames_to_column("Gene")
+  } -> df_cyclic_neuron_non_zero_prop
+
+names(RNA_norm_list) %>% 
+  {.[grepl("DN1p", .)]} %>% 
+  map(function(x){
+    cluster_ = x
+    RNA_norm_list[[cluster_]] %>% column_to_rownames("Gene") -> df_
+    c("ZT02", "ZT06", "ZT10", "ZT14", "ZT18", "ZT22") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        ZT_ = x
+        df_ %>% dplyr::select(contains(ZT_)) -> df_
+        df_ %>% 
+#          rowMeans() %>% 
+          apply(., 1, function(x){sum(x!=0)/length(x)}) %>% 
+          as.data.frame() %>% 
+          "colnames<-"(., sprintf("%s_REP%s", ZT_, cluster_)) -> df_
+      }) %>% purrr::reduce(., cbind) -> df_
+  }) %>% purrr::reduce(., cbind) %>% 
+  {
+    df_ = .
+    colnames(df_) %>% gtools::mixedsort() -> colnames_
+    df_[, colnames_] -> df_
+    df_ %>% rownames_to_column("Gene")
+  } %>% "colnames<-"(., gsub("(.+):.+", "\\1", colnames(.))) -> df_cyclic_neuron_non_zero_prop_DN1p
+
+
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+
+list(df_ = df_cyclic_neuron_mean) %>% 
+  map(function(x){
+    df_ = x
+    df_$Gene -> gene_
+    df_ %>% dplyr::select(-Gene) -> exp_matrix_
+    colnames(exp_matrix_) %>% gsub("ZT(.+?)_.+", "\\1", .) %>% as.numeric() -> timepoints_
+    cyclic_HMP(exp_matrix=exp_matrix_, gene = gene_, timepoints = timepoints_) -> res_
+    res_ %>% dplyr::select(!matches("LS|meta2d", ignore.case = FALSE)) %>% recal_cauchy_p_and_hmp(.) -> res_
+  }) -> res_mean
+res_mean$df_ %>% dplyr::mutate(F24_phase = (HR_phi/(2*pi))*24) -> res_mean$df_
+
+list(df_ = df_cyclic_neuron_non_zero_prop) %>% 
+  map(function(x){
+    df_ = x
+    df_$Gene -> gene_
+    df_ %>% dplyr::select(-Gene) -> exp_matrix_
+    colnames(exp_matrix_) %>% gsub("ZT(.+?)_.+", "\\1", .) %>% as.numeric() -> timepoints_
+    cyclic_HMP(exp_matrix=exp_matrix_, gene = gene_, timepoints = timepoints_) -> res_
+    res_ %>% dplyr::select(!matches("LS|meta2d", ignore.case = FALSE)) %>% recal_cauchy_p_and_hmp(.) -> res_
+  }) -> res_non_zero_prop
+res_non_zero_prop$df_ %>% dplyr::mutate(F24_phase = (HR_phi/(2*pi))*24) -> res_non_zero_prop$df_
+
+list(df_ = df_cyclic_neuron_mean_DN1p) %>% 
+  map(function(x){
+    df_ = x
+    df_$Gene -> gene_
+    df_ %>% dplyr::select(-Gene) -> exp_matrix_
+    colnames(exp_matrix_) %>% gsub("ZT(.+?)_.+", "\\1", .) %>% as.numeric() -> timepoints_
+    cyclic_HMP(exp_matrix=exp_matrix_, gene = gene_, timepoints = timepoints_) -> res_
+    res_ %>% dplyr::select(!matches("LS|meta2d", ignore.case = FALSE)) %>% recal_cauchy_p_and_hmp(.) -> res_
+  }) -> res_mean_DN1p
+res_mean_DN1p$df_ %>% dplyr::mutate(F24_phase = (HR_phi/(2*pi))*24) -> res_mean_DN1p$df_
+
+list(df_ = df_cyclic_neuron_non_zero_prop) %>% 
+  map(function(x){
+    df_ = x
+    df_$Gene -> gene_
+    df_ %>% dplyr::select(-Gene) -> exp_matrix_
+    colnames(exp_matrix_) %>% gsub("ZT(.+?)_.+", "\\1", .) %>% as.numeric() -> timepoints_
+    cyclic_HMP(exp_matrix=exp_matrix_, gene = gene_, timepoints = timepoints_) -> res_
+    res_ %>% dplyr::select(!matches("LS|meta2d", ignore.case = FALSE)) %>% recal_cauchy_p_and_hmp(.) -> res_
+  }) -> res_non_zero_prop_DN1p
+res_non_zero_prop_DN1p$df_ %>% dplyr::mutate(F24_phase = (HR_phi/(2*pi))*24) -> res_non_zero_prop_DN1p$df_
+
+#Plot circadian genes
+library(patchwork)
+list(all_cyclic_neuron = df_cyclic_neuron_mean, DN1p_cyclic_neuron = df_cyclic_neuron_mean_DN1p) -> df_cycli_neuron_mean
+list(all_cyclic_neuron = df_cyclic_neuron_non_zero_prop, DN1p_cyclic_neuron = df_cyclic_neuron_non_zero_prop_DN1p) -> df_cyclic_neuron_non_zero_prop
+res_mean = list(all_cyclic_neuron = res_mean, DN1p_cyclic_neuron = res_mean_DN1p)
+res_non_zero_prop = list(all_cyclic_neuron = res_non_zero_prop, DN1p_cyclic_neuron = res_non_zero_prop_DN1p)
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    c("tim", "Clk", "per", "cry", "DIP-beta", "vri") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        gene_ = x
+        
+        df_cyclic_neuron_mean[[neuron_type_]] %>% 
+          filter(Gene == gene_) %>% 
+          pivot_longer(cols = -Gene, names_to = "timepoint", values_to = "expression") %>% 
+          mutate(cluster = gsub(".+_REP(\\d+)", "\\1", timepoint)) %>% 
+          mutate(timepoint = gsub("ZT(\\d+)_.+", "\\1", timepoint) %>% as.numeric()) -> df_mean
+        
+        df_cyclic_neuron_non_zero_prop[[neuron_type_]] %>% 
+          filter(Gene == gene_) %>% 
+          pivot_longer(cols = -Gene, names_to = "timepoint", values_to = "expression") %>% 
+          mutate(cluster = gsub(".+_REP(\\d+)", "\\1", timepoint)) %>% 
+          mutate(timepoint = gsub("ZT(\\d+)_.+", "\\1", timepoint) %>% as.numeric()) -> df_non_zero_prop
+        
+        mean_p_adj = res_mean[[neuron_type_]]$df_ %>% filter(Gene == gene_) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
+        df_mean %>% 
+          ggplot(aes(x = timepoint, y = expression, group = timepoint)) + 
+          geom_boxplot(fill = "lightblue") + 
+          theme_classic() + 
+          ylab("Gene expression") + 
+          xlab("ZT") + 
+          scale_x_continuous(breaks = seq(2,22,4)) + 
+          ggtitle(sprintf("%s\np.adj=%s", gene_, mean_p_adj)) -> p_mean
+        
+        non_zero_proportion_p_adj = res_non_zero_prop[[neuron_type_]]$df_ %>% filter(Gene == gene_) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
+        df_non_zero_prop %>% 
+          ggplot(aes(x = timepoint, y = expression, group = timepoint)) + 
+          geom_boxplot(fill = "lightgreen") + 
+          scale_y_continuous(limits = c(0,1)) + 
+          theme_classic() + 
+          ylab("Non zero proportion") + 
+          xlab("ZT") + 
+          scale_x_continuous(breaks = seq(2,22,4)) + 
+          ggtitle(sprintf("%s\np.adj=%s", gene_, non_zero_proportion_p_adj)) -> p_non_zero_prop
+        
+        wrap_plots(p_mean, p_non_zero_prop, ncol = 2) -> p
+        
+      }) -> p_list
+  }) -> p_list
+
+wrap_plots(p_list$all_cyclic_neuron, ncol = 1)
+wrap_plots(p_list$DN1p_cyclic_neuron, ncol = 1)
+wrap_plots(p_list, ncol = 2) -> p_cyclic_genes
+wrap_plots(p_tsne, p_cyclic_genes, ncol = 2, widths = c(0.8, 1)) -> p_r1
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    c("tim", "Clk", "per", "cry", "DIP-beta", "vri") %>% 
+      "names<-"(.,.) %>% 
+      #  .[1] %>% 
+      map(function(x){
+        gene_ = x
+        gene_expr_mat = p_list[[neuron_type_]][[gene_]][[1]][["data"]] %>% group_by(Gene, timepoint) %>% 
+          summarise(mean_expression = mean(expression), sd = sd(expression)) %>% 
+          dplyr::mutate(group = "Mean")
+        non_zero_mat = p_list[[neuron_type_]][[gene_]][[2]][["data"]] %>% group_by(Gene, timepoint) %>%
+          summarise(mean_expression = mean(expression), sd = sd(expression)) %>% 
+          dplyr::mutate(group = "Nonzero")
+        scale_factor = max(gene_expr_mat$mean_expression)/max(non_zero_mat$mean_expression)
+        non_zero_mat$mean_expression = non_zero_mat$mean_expression*scale_factor
+        non_zero_mat$sd = non_zero_mat$sd*scale_factor
+        rbind(gene_expr_mat, non_zero_mat) -> df_
+        df_ %>% 
+          ggplot(aes(x = timepoint, y = mean_expression, group = group, fill = group, color = group)) + 
+          geom_line() + 
+          geom_ribbon(aes(ymin = mean_expression - sd, ymax = mean_expression + sd), alpha = 0.2, color = NA) +
+          scale_y_continuous(name = "Mean", sec.axis = sec_axis(~./scale_factor, name = "Nonzero_Prop")) + 
+          scale_color_manual(values = c(Mean="#56B4E9", Nonzero="#009E73")) +
+          scale_fill_manual(values = c(Mean="#56B4E9", Nonzero="#009E73")) + 
+          xlab("ZT") -> p
+        
+        mean_p_adj = res_mean[[neuron_type_]]$df_ %>% filter(Gene == gene_) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
+        non_zero_proportion_p_adj = res_non_zero_prop[[neuron_type_]]$df_ %>% filter(Gene == gene_) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
+        p + ggtitle(sprintf("%s\n(Mean) p.adj=%s\n(Nonzero) p.adj=%s", gene_, mean_p_adj, non_zero_proportion_p_adj))
+      }) -> p_list_1
+  }) -> p_list_1 #Supp Fig 16B
+
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    list(
+      Mean = res_mean[[neuron_type_]]$df_ %>% filter(cauchy_BH.Q < 0.05) %>% .$Gene, 
+      `Nonzero Prop.` = res_non_zero_prop[[neuron_type_]]$df_ %>% filter(cauchy_BH.Q < 0.05) %>% .$Gene
+    ) %>% ggvenn::ggvenn(., fill_color = c("lightblue", "lightgreen")) -> p_venn
+  }) -> p_venn
+p_venn$all_cyclic_neuron #Supp Fig 16C
+#p_venn$DN1p_cyclic_neuron
+
+
+## P adjust correlation (Mean vs Non zero prop.)
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    list(
+      Mean = res_mean[[neuron_type_]]$df_$cauchy_BH.Q,
+      Non_zero = res_non_zero_prop[[neuron_type_]]$df_$cauchy_BH.Q
+    ) %>% as.data.frame() %>% 
+      -log(., 10) %>% 
+      drop_na() %>% 
+      {
+        df_ = .
+        x_intercept = median(df_$Mean)
+        y_intercept = median(df_$Non_zero)
+        cor_ = cor(df_$Mean, df_$Non_zero, method = "pearson") %>% round(., 2)    
+        
+        df_ %>% 
+          ggplot(aes(x = Mean, y = Non_zero)) + 
+          #      geom_point(size = 0.3, alpha = 0.5) + 
+          geom_hex(bins = 100) + 
+          scale_fill_gradient(trans = 'log', name = "Count (log scale)") +
+          geom_vline(xintercept = x_intercept, linetype = "dashed", color = "red") +
+          geom_hline(yintercept = y_intercept, linetype = "dashed", color = "red") + 
+          theme_classic() + 
+          annotate(geom = "text", x = 2.5, y = 11.5, label = sprintf("r = %s", cor_)) + 
+          xlab("-log10(p.adj):mean") + 
+          ylab("-log10(p.adj):non zero prop.")
+      } -> p_val_correlation
+  }) -> p_val_correlation
+p_val_correlation$all_cyclic_neuron #Fig 3E
+#p_val_correlation$DN1p_cyclic_neuron
+
+
+# Phase correlation (Mean vs Non zero prop.)
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    
+    list(
+      Mean = res_mean[[neuron_type_]]$df_$F24_phase,
+      Non_zero = res_non_zero_prop[[neuron_type_]]$df_$F24_phase
+    ) %>% as.data.frame() %>% 
+      drop_na() %>% 
+      dplyr::mutate(Non_zero = case_when(
+#        Mean - Non_zero > 12 ~ Non_zero+24,
+#        Mean - Non_zero < -12 ~ Non_zero-24,
+        Non_zero - Mean > 12 ~ Non_zero - 24,
+        TRUE ~ Non_zero
+      )) %>% 
+      dplyr::mutate(Mean = case_when(
+        Non_zero - Mean < -12 ~ Mean - 24, 
+        TRUE ~ Mean
+      )) %>% 
+      {
+        df_ = .
+        print(nrow(df_))
+        cor_ = cor(df_$Mean, df_$Non_zero, method = "pearson")
+        df_ %>%
+          ggplot(aes(x = Mean, y = Non_zero)) + 
+          geom_hex(bins = 100) + 
+          scale_fill_gradient(trans = 'log', name = "Count (log scale)") +
+          geom_abline(intercept = 0, slope = 1, color = "red") + 
+          annotate("text", x = 3, y = 23, label = sprintf("cor = %.2f", cor_)) + 
+          ylab("Adjusted phase: nonzero prop.") + 
+          xlab("Adjusted phase: mean") + 
+          theme_classic() + 
+          scale_x_continuous(breaks = seq(-10,20,5)) + 
+          scale_y_continuous(breaks = seq(-10,20,5))
+      } -> p_phase_correlation
+  }) -> p_phase_correlation
+p_phase_correlation$all_cyclic_neuron #Fig 3E
+#p_phase_correlation$DN1p_cyclic_neuron
+
+# Amplitude correlation (Mean vs Non zero prop.)
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    list(
+      Mean = res_mean[[neuron_type_]]$df_$MetaCycle_JTK_amplitude,
+      Non_zero = res_non_zero_prop[[neuron_type_]]$df_$MetaCycle_JTK_amplitude
+    ) %>% as.data.frame() %>% 
+      drop_na() %>% 
+      log(.) %>% 
+      filter(is.finite(Mean)&is.finite(Non_zero)) %>% 
+      {
+        df_ = .
+        #    df_ %>% dplyr::filter(Non_zero > -20) -> df_
+        df_ %>% dplyr::filter(Non_zero > quantile(Non_zero, 0.01)) -> df_
+        #    df_ %>% dplyr::filter(Non_zero < quantile(Non_zero, 0.95)) -> df_
+        print(nrow(df_))
+        cor_ = cor(df_$Mean, df_$Non_zero, method = "pearson")
+        df_ %>%
+          ggplot(aes(x = Mean, y = Non_zero)) + 
+          geom_hex(bins = 100) + 
+          #      scale_fill_gradient(trans = 'log', low = "lightblue", high = "darkblue", name = "Count (log scale)") +
+          #      geom_abline(intercept = 0, slope = 1, color = "red") + 
+          annotate("text", x = -8, y = -2, label = sprintf("cor = %.2f", cor_)) + 
+          ylab("log(amplitude): nonzero prop.") + 
+          xlab("log(amplitude): mean") + 
+          theme_classic() 
+        #      scale_x_continuous(limits = c(-10, 10))
+      } -> p_amp_correlation
+  }) -> p_amp_correlation
+p_amp_correlation$all_cyclic_neuron #Fig 3E
+#p_amp_correlation$DN1p_cyclic_neuron
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    list(
+      Mean = res_mean[[neuron_type_]]$df_ %>% filter(cauchy_BH.Q < 0.05) %>% .$Gene, 
+      Nonzero = res_non_zero_prop[[neuron_type_]]$df_ %>% filter(cauchy_BH.Q < 0.05) %>% .$Gene
+    ) %>% ggvenn::list_to_data_frame() %>% 
+      list(df_ = .) %>% 
+      map(function(x){
+        df_ = x
+        df_ %>% filter(Mean&Nonzero) %>% .$key -> Overlapped
+        df_ %>% filter(Mean&!Nonzero) %>% .$key -> Mean
+        df_ %>% filter(!Mean&Nonzero) %>% .$key -> Nonzero
+        list(Overlapped = Overlapped, Mean = Mean, Nonzero = Nonzero) -> list_
+      }) %>% .[[1]] -> gene_set
+  }) -> gene_set
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    gene_set[[neuron_type_]] %>% 
+      map2(.x=.,.y=names(.),.f=function(x,y){
+        group_ = y
+        gene_ = x
+        df_cyclic_neuron_mean[[neuron_type_]] %>% column_to_rownames("Gene") %>% .[gene_, ] %>% as.vector() %>% 
+          purrr::reduce(., c) %>% 
+          as.data.frame() %>% 
+          "colnames<-"(., c("expression")) %>% 
+          mutate(group = group_)
+      }) %>% do.call(rbind, .) -> df_
+  }) -> df_
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    df_[[neuron_type_]] %>% 
+      dplyr::filter(group %in% c("Mean", "Nonzero")) -> df_
+    df_ %>% dplyr::filter(group == "Mean") %>% .$expression %>% quantile(., 0.75) %>% .[[1]] %>% {. + 1} %>% as.integer() -> up_break
+    df_ %>% dplyr::filter(group == "Mean") %>% .$expression %>% quantile(., 0.99)%>% .[[1]] %>% {. + 1} %>% as.integer() -> up_break_max
+    print(c(up_break, up_break_max))
+#      mutate(group = factor(group, levels = c("Mean", "Overlapped", "Nonzero"))) %>% 
+    df_ %>% 
+      mutate(group = factor(group, levels = c("Mean", "Nonzero"))) %>% 
+      ggplot(aes(x = group, y = expression, fill = group)) + 
+      geom_boxplot(width = 0.45) + 
+      scale_y_break(c(up_break, up_break_max), scales = 0.5) + 
+      theme_classic() + 
+      scale_fill_manual(values = c("Mean" = "#56B4E9", "Nonzero" = "#009E73")) +
+#      ggpubr::stat_compare_means(comparisons = list(c("Mean", "Overlapped"), 
+#                                                    c("Overlapped", "Nonzero"), 
+#                                                    c("Mean", "Nonzero")), method = "t.test") + 
+      theme(legend.position = "none") + 
+      xlab(NULL) + 
+      ylab("Normalized expression") -> p_1
+  })-> p_1
+#p_1$all_cyclic_neuron+p_1$DN1p_cyclic_neuron
+p_1$all_cyclic_neuron #Supp Fig 16D
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    gene_set[[neuron_type_]] %>% 
+      map2(.x=.,.y=names(.),.f=function(x,y){
+        group_ = y
+        gene_ = x
+        df_cyclic_neuron_non_zero_prop[[neuron_type_]] %>% column_to_rownames("Gene") %>% .[gene_, ] %>% as.vector() %>% 
+          purrr::reduce(., c) %>% 
+          as.data.frame() %>% 
+          "colnames<-"(., c("expression")) %>% 
+          mutate(group = group_)
+      }) %>% do.call(rbind, .) %>% 
+      filter(is.finite(expression)) -> df_
+  }) -> df_
+
+
+c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    neuron_type_ = x
+    df_[[neuron_type_]] %>% 
+      dplyr::filter(group %in% c("Mean", "Nonzero")) -> df_
+    df_ %>% 
+      mutate(group = factor(group, levels = c("Mean", "Nonzero"))) %>% 
+      ggplot(aes(x = group, y = expression, fill = group)) + 
+      geom_boxplot(width = 0.5) + 
+      scale_fill_manual(values = c("Mean" = "#56B4E9", "Nonzero" = "#009E73")) +
+      theme_classic() + 
+      theme(legend.position = "none") + 
+      xlab(NULL) + 
+      ylab("Non zero proportion") -> p_2
+  }) -> p_2
+#p_2$all_cyclic_neuron+p_2$DN1p_cyclic_neuron
+p_2$all_cyclic_neuron #Supp Fig 16D
