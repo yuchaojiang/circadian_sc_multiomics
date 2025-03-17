@@ -1182,3 +1182,197 @@ enriched.TF.motifs %>%
   coord_polar(start = 0) #Fig_2F
 
 ####
+
+# 10. Hepatocytes rhythmicity venndiagram (RNA expression vs ATAC activity vs TF motif score) ----
+setwd("~/Dropbox/Research/singulomics/")
+
+library(Seurat)
+library(Signac)
+library(EnsDb.Mmusculus.v79) # mm10
+library(GenomeInfoDb)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(stringr)
+library(biovizBase)
+library(SingleCellExperiment)
+library(mbkmeans)
+library(tidyverse)
+library(gridExtra)
+library(ggpubr)
+library(MetaCycle)
+library(future)
+library(furrr)
+library(DescTools)
+library(HarmonicRegression)
+library(pheatmap)
+
+
+
+# Load in the integrated and QC'ed data
+readRDS("github_rda/integrated_sc_all_cell_types.rds") -> sc
+readRDS("github_rda/Hepatocytes_cellnames.rds") -> hepatocytes_cells
+
+colnames(sc) %>% length()
+length(hepatocytes_cells)
+
+sc <- sc[,hepatocytes_cells]
+sc$celltype %>% table()
+
+DimPlot(sc, group.by = "ZT", label = TRUE, reduction = "multicca.umap", repel = TRUE)
+DefaultAssay(sc) <- "SCT"
+
+# Choose resolution: do not need too many metacells, especially because we need to characterize the distributions of cells within the metacells
+resolution=0.5
+sc <- FindNeighbors(object = sc, reduction = 'multicca.pca', dims = 1:50, verbose = FALSE, graph.name=c('multicca_nn','multicca_snn'))
+sc <- FindClusters(object = sc, algorithm = 1, verbose = FALSE, graph.name='multicca_snn',
+                   resolution=resolution)
+DimPlot(sc, group.by = "seurat_clusters", label = TRUE, reduction = "multicca.umap", repel = TRUE)
+sc@meta.data$seurat_clusters %>% unique() %>% length()
+
+sc=sc[,!grepl('KO',sc$group)] # Remove the knockout to look at circadian rhythmicity
+sc$group=droplevels(sc$group)
+table(sc$group)
+
+sc$ZT=as.numeric(gsub('ZT','',sc$ZT)) # Change ZT to be numeric time
+sc=sc[,sc$celltype=='Hepatocytes'] # Keep only hepatocytes
+table(sc$ZT)
+table(sc$celltype)
+
+sc$cc_cluster=NULL
+sc$cc_clusters=sc$seurat_clusters
+table(sc$cc_clusters)
+table(sc$cc_clusters, sc$group)
+dim(sc)
+
+# Minimum number of cells per timepoint in each cluster: 50
+sc=sc[,sc$cc_clusters %in% names(which(apply(table(sc$cc_clusters, sc$group), 1, min)>50))]
+sc$cc_clusters=droplevels(sc$cc_clusters)
+table(sc$cc_clusters, sc$group)
+length(table(sc$cc_clusters)) # Total number of replicates after filtering
+sc$cluster=sc$cc_clusters
+
+
+dim(sc@assays$MOTIF@data) # Motif deviation
+dim(sc@assays$RNA@counts) # Gene expression
+dim(sc@assays$gene_activity@data) # Gene activity
+length(sc@assays$ATAC@motifs@motif.names) # Motif to gene name conversion
+table(sc$cc_clusters) # cluster: need to stratify by ZT
+
+motifxTF <- unlist(sc@assays$ATAC@motifs@motif.names)
+motifxTF <- cbind(names(motifxTF), toupper(motifxTF))
+colnames(motifxTF) <- c("motif", "TF")
+
+
+TF.motif=sc@assays$MOTIF@data
+all(rownames(TF.motif)==motifxTF[,1])
+rownames(TF.motif)=motifxTF[,2]
+
+TF.filter=(rownames(TF.motif) %in% toupper(rownames(sc@assays$RNA@counts))) & 
+  (rownames(TF.motif) %in% toupper(rownames(sc@assays$gene_activity@data)))
+
+TF.motif=TF.motif[TF.filter,]
+motifxTF=motifxTF[TF.filter,]
+TF.exp=sc@assays$RNA@counts[match(rownames(TF.motif), toupper(rownames(sc@assays$RNA@counts))),]
+TF.activity=sc@assays$gene_activity@counts[match(rownames(TF.motif), toupper(rownames(sc@assays$gene_activity@counts))),]
+
+
+head(TF.motif[1:10, 1:10])
+head(TF.exp[1:10, 1:10])
+
+
+cc_clusters_ZT=paste0(sc$cc_clusters, '_ZT', sc$ZT)
+table(cc_clusters_ZT)
+
+
+# Aggregate by cc_clusters_ZT
+TF.motif.ag= aggregate(t(TF.motif), by=list(cc_clusters_ZT), FUN=mean)
+rownames(TF.motif.ag)=TF.motif.ag$Group.1
+TF.motif.ag=as.matrix(TF.motif.ag[,-1])
+
+TF.exp.ag = aggregate(t(TF.exp), by=list(cc_clusters_ZT), FUN=sum)
+rownames(TF.exp.ag)=TF.exp.ag$Group.1
+TF.exp.ag=as.matrix(TF.exp.ag[,-1])
+TF.exp.ag=sweep(TF.exp.ag, 1, rowSums(TF.exp.ag), FUN = '/')
+
+TF.activity.ag = aggregate(t(TF.activity), by=list(cc_clusters_ZT), FUN=sum)
+rownames(TF.activity.ag)=TF.activity.ag$Group.1
+TF.activity.ag=as.matrix(TF.activity.ag[,-1])
+TF.activity.ag=sweep(TF.activity.ag, 1, rowSums(TF.activity.ag), FUN = '/')
+
+# TF networks
+# First construct consensus PCs
+TF.motif.pc=t(TF.motif.ag)%*%svd(t(TF.motif.ag))$v[,1:10]
+TF.exp.pc=t(TF.exp.ag)%*%svd(t(TF.exp.ag))$v[,1:10]
+TF.activity.pc=t(TF.activity.ag)%*%svd(t(TF.activity.ag))$v[,1:10]
+
+TF.pc=cbind(TF.motif.pc, TF.exp.pc, TF.activity.pc)
+TF.consensus.pc=as.matrix(TF.pc%*%svd(TF.pc)$v)
+TF.cor=cor(t(TF.consensus.pc))
+
+pheatmap(TF.cor)
+
+rm(sc)
+save.image(file='github_rda/tf_networks.rda')
+
+library(Seurat)
+library(Signac)
+library(EnsDb.Mmusculus.v79) # mm10
+library(GenomeInfoDb)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(stringr)
+library(biovizBase)
+library(SingleCellExperiment)
+library(mbkmeans)
+library(tidyverse)
+library(gridExtra)
+library(ggpubr)
+library(MetaCycle)
+library(future)
+library(furrr)
+library(DescTools)
+library(HarmonicRegression)
+library(pheatmap)
+library(harmonicmeanp)
+
+load('github_rda/tf_networks.rda')
+
+source("github/Calculate_HMP.R")
+
+Calculate_cyclic_pval = function(dat_){
+  dat_ %>% 
+    t() %>% 
+    "colnames<-"(., sprintf("%s_REP%s", 
+                            gsub(".+_(ZT\\d+)", "\\1", colnames(.)), 
+                            gsub("(.+)_ZT\\d+", "\\1", colnames(.)))) %>% 
+    {.[,gtools::mixedsort(colnames(.))]} -> df_
+  timepoints = gsub("ZT(\\d+)_.+", "\\1", colnames(df_)) %>% as.numeric()
+  res_ = cyclic_HMP(exp_matrix = as_tibble(df_), minper_ = 24, timepoints = timepoints, gene = rownames(df_))
+  res_ %>% dplyr::select(matches("Gene|JTK|HR")) -> res_
+  recal_cauchy_p_and_hmp(res_) -> res_
+  return(res_)
+}
+Calculate_cyclic_pval(TF.motif.ag) -> res_TF.motif
+Calculate_cyclic_pval(TF.exp.ag) -> res_TF.exp
+res_TF.exp$Gene = toupper(res_TF.exp$Gene)
+Calculate_cyclic_pval(TF.activity.ag) -> res_TF.activity
+res_TF.activity$Gene = toupper(res_TF.activity$Gene)
+
+list(
+  TF.motif = res_TF.motif,
+  TF.exp = res_TF.exp,
+  TF.activity = res_TF.activity
+     ) %>% 
+  map(function(df_){
+    df_ %>% dplyr::filter(cauchy_BH.Q < 0.05) -> df_
+#    df_ %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.05) -> df_
+    dim(df_)
+    df_$Gene -> Gene_
+  }) %>% {
+    list_ = .
+    list_ ->> venn_list_
+    ggvenn::ggvenn(list_) -> p    
+    p
+  } -> p_venn #Supp Fig 12A
