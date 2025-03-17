@@ -1,2 +1,5 @@
 # circadian_sc_multiomics
-Data and script repository for Tong et al.
+This repository contains all scripts for ‘Detecting Circadian Rhythmicity in Mouse Liver via Single-Cell Multiomics.’
+
+## Author
+Chun Yip Tong, Yuchao Jiang
