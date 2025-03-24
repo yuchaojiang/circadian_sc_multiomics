@@ -223,3 +223,102 @@ list_tmp %>%
     p + ggtitle(sprintf("%s: n=%s\nr=%s", celltype_, n_genes, cor_)) -> p
   }) -> p_list
 patchwork::wrap_plots(p_list, ncol = 4) #Supp_Fig_5b ----
+
+#Plot celltype specific heatmap
+rm(list=ls())
+
+library(tidyverse)
+library(Seurat)
+library(Signac)
+library(pheatmap)
+
+setwd("~/Dropbox/singulomics")
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+sc=sc[,!grepl('KO',sc$group)]
+
+Idents(sc) %>% as.data.frame() %>% 
+  rownames_to_column("cell_name") %>%
+  "colnames<-"(., c("cell_name", "old")) %>% 
+  left_join(x = ., 
+            y = sc@meta.data %>% rownames_to_column("cell_name"), 
+            by = "cell_name") %>% 
+  dplyr::select(cell_name, celltype) %>% 
+  {setNames(.$celltype, as.character(.$cell_name))} -> new_ident
+
+all(names(Idents(sc)) == names(new_ident))
+Idents(sc) <- new_ident
+
+DefaultAssay(sc) <- "SCT"
+sc@meta.data$celltype %>% unique() %>% 
+  "names<-"(., .) %>% 
+  map(function(x){
+    print(x)
+    FindMarkers(sc, ident.1 = x)
+  }) -> sc_markers_list
+
+list_tmp = list()
+sc_markers_list %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    celltype_ = y
+    df_ = x
+    df_ %>% filter(p_val_adj < 0.05, avg_log2FC > 0.58) %>% rownames() -> DEG
+    print(sprintf("%s DEG: %s", celltype_, length(DEG)))
+    
+    unique(sc$celltype) %>% 
+      map(function(x_){
+        sc@meta.data %>% filter(celltype == x_) %>% rownames() -> cell_sele     
+        sc@assays$SCT@data[DEG, cell_sele] %>% rowMeans() %>% 
+          as.data.frame() %>% "colnames<-"(., x_)
+      }) %>% do.call(cbind, .) %>% as.matrix() -> df_
+    
+    df_ %>%
+      apply(., 1, function(x){scales::rescale(x, to = c(0,1))}) %>% 
+      t() -> df_
+    
+#    pheatmap(df_, cluster_rows = T, cluster_cols = F, show_rownames = F, 
+    pheatmap(df_, cluster_rows = T, cluster_cols = F, show_rownames = F, cutree_rows = 10,
+             main=sprintf("%s DEG: n = %s", y, length(DEG))) -> p
+    list_tmp[[celltype_]] <<- p
+    p$gtable -> p
+    #  recordPlot() -> p
+    return(p)
+  }) -> p_list
+
+cowplot::plot_grid(plotlist = p_list, ncol = 4, nrow = 2)
+
+list_tmp %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    celltype_ = y
+    x$tree_row %>% stats::cutree(., 10) %>% table() %>% sort() %>% rev() -> table_
+    names(table_)[1] -> clust_
+    x$tree_row %>% stats::cutree(., 10) %>% {.[. == clust_]} %>% names() -> genes_
+    sc_markers_list[[celltype_]][genes_, ] %>% dplyr::arrange(p_val_adj, desc(avg_log2FC)) -> df_
+    genes_ = rownames(df_)
+    if (celltype_ == "Kupffer cells"){
+      x$tree_row %>% stats::cutree(., 10) %>% {.[. == clust_]} %>% names() %>% .[2:21] -> genes_
+    }else if (celltype_ == "Endothelial cells"){
+      genes_[c(1:9, 11:21)] -> genes_
+    } else if (celltype_ == "Fibroblasts"){
+      genes_[c(1:2,4:8,10:22)] -> genes_
+    } else if (celltype_ == "T cells"){
+      genes_ = genes_[1:20]
+    }else{
+      genes_ = genes_[1:20]
+    }
+    return(genes_)
+  }) %>% purrr::reduce(., c) -> features_
+length(features_)
+
+sc@assays$SCT@data %>% 
+#  .[1:10,1:10] %>% 
+  apply(., 1, function(x){scales::rescale(x, to = c(0,1))}) %>% 
+  t() -> sc@assays$SCT@scale.data
+sc$celltype = factor(sc$celltype, levels = c("Hepatocytes", "Endothelial cells", "Fibroblasts", "Kupffer cells", "B cells", "T cells", "Cholangiocytes"))
+sc$celltype
+
+DoHeatmap(sc, features = features_, group.by = "celltype", assay = "SCT", slot = "scale.data", label = T) + 
+  scale_fill_gradientn(colors = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name =
+                                                                  "RdYlBu")))(100)) + 
+  theme(axis.text.y = element_blank()) #Supp Fig 5A
+rm(sc)
+gc()
