@@ -1350,10 +1350,27 @@ Calculate_cyclic_pval = function(dat_){
     {.[,gtools::mixedsort(colnames(.))]} -> df_
   timepoints = gsub("ZT(\\d+)_.+", "\\1", colnames(df_)) %>% as.numeric()
   res_ = cyclic_HMP(exp_matrix = as_tibble(df_), minper_ = 24, timepoints = timepoints, gene = rownames(df_))
-  res_ %>% dplyr::select(matches("Gene|JTK|HR")) -> res_
+  res_ %>% dplyr::select(matches("Gene|JTK|HR|meta2d_AMP|meta2d_Base|meta2d_rAMP")) -> res_
   recal_cauchy_p_and_hmp(res_) -> res_
   return(res_)
 }
+
+#Renormalize RNA expression
+TF.exp.ag = aggregate(t(TF.exp), by=list(cc_clusters_ZT), FUN=mean)
+aggregate(t(TF.exp), by=list(cc_clusters_ZT), FUN=mean) %>% {.[,-1]} %>% rowSums() %>% median() -> TF.exp.median
+rownames(TF.exp.ag)=TF.exp.ag$Group.1
+TF.exp.ag=as.matrix(TF.exp.ag[,-1])
+TF.exp.ag=sweep(TF.exp.ag, 1, rowSums(TF.exp.ag), FUN = '/')
+TF.exp.ag = TF.exp.ag*TF.exp.median
+
+#Renormalized ATAC activity
+TF.activity.ag = aggregate(t(TF.activity), by=list(cc_clusters_ZT), FUN=mean)
+aggregate(t(TF.activity), by=list(cc_clusters_ZT), FUN=mean) %>% {.[,-1]} %>% rowSums() %>% median() -> TF.activity.median
+rownames(TF.activity.ag)=TF.activity.ag$Group.1
+TF.activity.ag=as.matrix(TF.activity.ag[,-1])
+TF.activity.ag=sweep(TF.activity.ag, 1, rowSums(TF.activity.ag), FUN = '/')
+TF.activity.ag = TF.activity.ag*TF.activity.median
+
 Calculate_cyclic_pval(TF.motif.ag) -> res_TF.motif
 Calculate_cyclic_pval(TF.exp.ag) -> res_TF.exp
 res_TF.exp$Gene = toupper(res_TF.exp$Gene)
@@ -1364,10 +1381,10 @@ list(
   TF.motif = res_TF.motif,
   TF.exp = res_TF.exp,
   TF.activity = res_TF.activity
-     ) %>% 
+) %>% 
   map(function(df_){
     df_ %>% dplyr::filter(cauchy_BH.Q < 0.05) -> df_
-#    df_ %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.05) -> df_
+    #    df_ %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.05) -> df_
     dim(df_)
     df_$Gene -> Gene_
   }) %>% {
@@ -1376,3 +1393,52 @@ list(
     ggvenn::ggvenn(list_) -> p    
     p
   } -> p_venn #Supp Fig 12A
+
+make_output_mat = function(df_){
+  df_ %>% as.data.frame() %>% rownames_to_column("ZT") %>% pivot_longer(-ZT, names_to = "Gene") %>% 
+    dplyr::mutate(ZT = gsub(".+_(ZT.+)", "\\1", ZT)) %>% 
+    group_by(ZT) %>% 
+    group_map(function(df_,y){
+      df_ %>% group_by(Gene) %>% 
+        group_map(function(df_1, y_1){
+          data.frame(Gene = y_1$Gene, ZT = y$ZT, value = mean(df_1$value))
+        }) %>% do.call(rbind, .) -> df_2
+      df_2 %>% pivot_wider(names_from = "ZT") -> df_2
+    }) %>% purrr::reduce(., left_join, by = "Gene") -> df_2  
+  colnames(df_2)[-1] %>% gtools::mixedsort() -> col_
+  df_2 = df_2[,c("Gene", col_)]
+  return(df_2)
+}
+
+make_output_mat(df_ = TF.exp.ag) -> TF.exp.ag_df
+make_output_mat(df_ = TF.activity.ag) -> TF.activity.ag_df
+make_output_mat(df_ = TF.motif.ag) -> TF.motif.ag_df
+
+make_output_mat_1 = function(res_df, dat_df){
+  radian_to_phase = function(radian){
+    phase = (radian/(2*pi))*24
+    return(phase)
+  }
+  res_df %>% dplyr::mutate(Phase = radian_to_phase(HR_phi), Gene = toupper(Gene)) %>% dplyr::select(Gene, cauchy_p, cauchy_BH.Q, Phase, MetaCycle_meta2d_AMP, MetaCycle_meta2d_Base, MetaCycle_meta2d_rAMP) -> res_df
+  dat_df$Gene = toupper(dat_df$Gene)
+  left_join(x = res_df, y = dat_df, by = "Gene") %>% dplyr::arrange(cauchy_BH.Q) -> df_final
+  return(df_final)
+}
+
+make_output_mat_1(res_df = res_TF.exp, dat_df = TF.exp.ag_df) -> output_TF.exp
+make_output_mat_1(res_df = res_TF.activity, dat_df = TF.activity.ag_df) -> output_TF.activity
+make_output_mat_1(res_df = res_TF.motif, dat_df = TF.motif.ag_df) -> output_TF.motif
+
+library(openxlsx)
+wb = createWorkbook()
+
+addWorksheet(wb, "TF_expression")
+writeData(wb, sheet = "TF_expression", x = output_TF.exp)
+
+addWorksheet(wb, "TF_ATAC_activity")
+writeData(wb, sheet = "TF_ATAC_activity", x = output_TF.activity)
+
+addWorksheet(wb, "TF_motif_score")
+writeData(wb, sheet = "TF_motif_score", x = output_TF.motif)
+
+saveWorkbook(wb, "~/Downloads/00_Supp_Table_4_1.xlsx", overwrite = TRUE)
