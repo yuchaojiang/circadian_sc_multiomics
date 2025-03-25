@@ -1200,7 +1200,195 @@ peak_distance_matrix <- peak_distance_matrix[,gene_select]
 
 # Generate circadian_gene_peak_expression_matrix and spatial_gene_peak_expression_matrix
 
+##Link by zone##
+args[1] %>% as.numeric() -> se
+seq(1, ncol(peak_distance_matrix), length.out = 50) %>% 
+round() %>%  
+{
+    seq_ = .
+    1:49 %>% 
+    map(function(i){
+        start = seq_[i]
+        end = seq_[i+1]-1
+        if (i == 49){end = seq_[i+1]}
+        data.frame(start = start, end = end)
+    }) %>% do.call(rbind, .)
+} -> start_end_df
 
+start_ = start_end_df[se, "start"]
+end_ = start_end_df[se, "end"]
+output_dir = "./rda/linked_peak/"
+
+sc@meta.data %>% 
+  dplyr::mutate(idx = as.integer(cluster)) %>% 
+  #  .$idx %>% table()
+  dplyr::mutate(zonations = case_when(
+    idx %in% 1:4 ~ "zone1", 
+    idx %in% 5:9 ~ "zone2",
+    idx %in% 10:13 ~ "zone3",
+    idx %in% 14:17 ~ "zone4",
+    idx %in% 18:21 ~ "zone5",
+    idx %in% 22:25 ~ "zone6",
+  )) %>% dplyr::select(-idx) -> sc@meta.data
+factor(sc$zonations) -> sc$zonations
+
+set.seed(123)
+sc@meta.data %>% 
+rownames_to_column("cellnames") %>% 
+group_by(zonations) %>% 
+group_map(function(x,y){
+  df_ = x
+  set.seed(123)
+  sprintf("Rep_%s", 1:4) %>% sample(., nrow(df_), replace = T) -> Rep_
+#  table(Rep_)
+  df_$Reps = Rep_
+  df_
+}, .keep = T) %>% do.call(rbind, .) %>% as.data.frame() %>% 
+column_to_rownames("cellnames") %>% 
+.[rownames(sc@meta.data),] -> sc@meta.data
+factor(sc$Reps) -> sc$Reps
+
+library(furrr)
+library(future)
+20000*1024^2 -> max_size
+options(future.globals.maxSize= max_size)
+plan(multisession, workers = 2)
+
+i = 0
+colnames(peak_distance_matrix) %>% 
+  "names<-"(.,.) %>% 
+  .[start_:end_] %>% 
+#  .[1:100] %>% 
+#  map(function(gene_){
+  future_map(function(gene_){
+    i <<- i+1
+    if(i%%10==0){print(i)}
+    peak_distance_matrix[,gene_] -> peaks_
+    peaks_ %>% {.[.==1]} %>% names() -> peaks
+    levels(sc$zonations) %>% 
+      map(function(zonations_){
+        sc@meta.data %>% dplyr::filter(zonations == zonations_) -> df_meta
+        levels(sc$Reps) %>% 
+        map(function(Reps_){
+          df_meta %>% dplyr::filter(Reps == Reps_) %>% rownames() -> cells
+          sc$nCount_RNA[cells] -> nCount_RNA
+          median(sc$nCount_RNA) -> median_nCount_RNA
+          sc@assays$RNA@counts[gene_, cells] %>% {(./nCount_RNA)*median_nCount_RNA} %>% mean()
+        }) %>% purrr::reduce(., c) -> RNA_expr
+      }) %>% purrr::reduce(., c) -> RNA_expr
+
+    levels(sc$zonations) %>% 
+      map(function(zonations_){
+        sc@meta.data %>% dplyr::filter(zonations == zonations_) -> df_meta
+        levels(sc$Reps) %>% 
+        map(function(Reps_){
+          df_meta %>% dplyr::filter(Reps == Reps_) %>% rownames() -> cells
+          sc$nCount_ATAC[cells] -> nCount_ATAC
+          median(sc$nCount_ATAC) -> median_nCount_ATAC
+        if (length(peaks) > 1){
+            sc@assays$ATAC@counts[peaks, cells] %>% {(./nCount_ATAC)*median_nCount_ATAC} %>% rowMeans() %>% 
+            as.data.frame() %>% t() %>% "rownames<-"(., sprintf("%s_%s", zonations_, Reps_)) -> ATAC_expr
+        }else{
+            sc@assays$ATAC@counts[peaks, cells] %>% {(./nCount_ATAC)*median_nCount_ATAC} %>% mean() %>% as.matrix() %>% 
+            "colnames<-"(., peaks) %>% "rownames<-"(., sprintf("%s_%s", zonations_, Reps_)) -> ATAC_expr
+        }
+        return(ATAC_expr)
+        }) %>% do.call(rbind, .) -> ATAC_expr
+      }) %>% do.call(rbind, .) -> ATAC_expr
+    
+    cbind(Gene_expr = RNA_expr, ATAC_expr) -> df_
+    rownames(df_) = rownames(ATAC_expr)
+    return(df_)
+  }) -> gene_peak_matrix_spatial
+saveRDS(gene_peak_matrix_spatial, file = sprintf("%sgene_peak_matrix_spatial_%s_%s_4_reps.rds", output_dir, start_, end_))
+
+##Linked by ZT time##
+args[1] %>% as.numeric() -> se
+seq(1, ncol(peak_distance_matrix), length.out = 50) %>% 
+round() %>%  
+{
+    seq_ = .
+    1:49 %>% 
+    map(function(i){
+        start = seq_[i]
+        end = seq_[i+1]-1
+        if (i == 49){end = seq_[i+1]}
+        data.frame(start = start, end = end)
+    }) %>% do.call(rbind, .)
+} -> start_end_df
+
+start_ = start_end_df[se, "start"]
+end_ = start_end_df[se, "end"]
+output_dir = "./rda/linked_peak/"
+
+set.seed(123)
+sc@meta.data %>% 
+rownames_to_column("cellnames") %>% 
+group_by(ZT) %>% 
+group_map(function(x,y){
+  df_ = x
+  set.seed(123)
+  sprintf("Rep_%s", 1:4) %>% sample(., nrow(df_), replace = T) -> Rep_
+  df_$Reps = Rep_
+  df_
+}, .keep = T) %>% do.call(rbind, .) %>% as.data.frame() %>% 
+column_to_rownames("cellnames") %>% 
+.[rownames(sc@meta.data),] -> sc@meta.data
+factor(sc$Reps) -> sc$Reps
+
+library(furrr)
+library(future)
+20000*1024^2 -> max_size
+options(future.globals.maxSize= max_size)
+plan(multisession, workers = 2)
+
+i = 0
+colnames(peak_distance_matrix) %>% 
+  "names<-"(.,.) %>% 
+  .[start_:end_] %>% 
+#  .[1:10] %>% 
+  future_map(function(gene_){
+    i <<- i+1
+    if(i%%10==0){print(i)}
+    peak_distance_matrix[,gene_] -> peaks_
+    peaks_ %>% {.[.==1]} %>% names() -> peaks
+    levels(sc$ZT) %>% 
+      map(function(ZT_){
+        sc@meta.data %>% dplyr::filter(ZT == ZT_) -> df_meta
+        levels(sc$Reps) %>% 
+        map(function(Reps_){
+          df_meta %>% dplyr::filter(Reps == Reps_) %>% rownames() -> cells
+          sc$nCount_RNA[cells] -> nCount_RNA
+          median(sc$nCount_RNA) -> median_nCount_RNA
+          sc@assays$RNA@counts[gene_, cells] %>% {(./nCount_RNA)*median_nCount_RNA} %>% mean()
+        }) %>% purrr::reduce(., c) -> RNA_expr
+      }) %>% purrr::reduce(., c) -> RNA_expr
+
+    levels(sc$ZT) %>% 
+      map(function(ZT_){
+        sc@meta.data %>% dplyr::filter(ZT == ZT_) -> df_meta
+        levels(sc$Reps) %>% 
+        map(function(Reps_){
+          df_meta %>% dplyr::filter(Reps == Reps_) %>% rownames() -> cells
+          sc$nCount_ATAC[cells] -> nCount_ATAC
+          median(sc$nCount_ATAC) -> median_nCount_ATAC
+        if (length(peaks) > 1){
+            sc@assays$ATAC@counts[peaks, cells] %>% {(./nCount_ATAC)*median_nCount_ATAC} %>% rowMeans() %>% 
+            as.data.frame() %>% t() %>% "rownames<-"(., sprintf("%s_%s", ZT_, Reps_)) -> ATAC_expr
+        }else{
+            sc@assays$ATAC@counts[peaks, cells] %>% {(./nCount_ATAC)*median_nCount_ATAC} %>% mean() %>% as.matrix() %>% 
+            "colnames<-"(., peaks) %>% "rownames<-"(., sprintf("%s_%s", ZT_, Reps_)) -> ATAC_expr
+        }
+        return(ATAC_expr)
+        }) %>% do.call(rbind, .) -> ATAC_expr
+      }) %>% do.call(rbind, .) -> ATAC_expr
+    
+    cbind(Gene_expr = RNA_expr, ATAC_expr) -> df_
+    rownames(df_) = rownames(ATAC_expr)
+    return(df_)
+  }) -> gene_peak_matrix_temporal
+
+saveRDS(gene_peak_matrix_temporal, file = sprintf("%sgene_peak_matrix_temporal_%s_%s_4_reps.rds", output_dir, start_, end_))
 
 # load the processed data
 c("spatial", "temporal") %>% 
