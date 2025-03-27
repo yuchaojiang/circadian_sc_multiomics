@@ -1966,6 +1966,51 @@ p_list$Ppard[[2]]
 p_list$Nr5a2[[1]]
 p_list$Nfyb[[1]]
 
+list(MEF2D = p_list$Mef2d[[1]], PPARD = p_list$Ppard[[2]], 
+     NR5A2 = p_list$Nr5a2[[1]], NFYB = p_list$Nfyb[[1]] 
+     ) %>% 
+  map2(.x=.,.y=names(.),.f=function(p_, TF_){
+    p_$labels$title -> title_
+    print(title_)
+    p_$data -> df_
+    df_ %>% 
+      group_by(group) %>% 
+      group_map(function(df_,y){
+        max(df_$measure) - min(df_$measure) -> range_original
+        df_ %>% 
+          dplyr::mutate(measure = scales::rescale(measure, to = c(0,1))) %>% 
+          dplyr::mutate(sd = sd/range_original) -> df_
+      }, .keep = T) %>% do.call(rbind, .) -> df_
+    motif_expr[TF_, ] %>% dplyr::select(-TRIPOD) %>% 
+      pivot_longer(everything(), names_to = "group") %>% 
+      dplyr::mutate(ZT = gsub("(ZT\\d+?)_.+", "\\1", group)) %>% 
+      group_by(ZT) %>% 
+      group_map(function(df_1, y){
+        df_1$value %>% mean() -> mean_
+        df_1$value %>% sd() -> sd_
+        ZT_ = y$ZT %>% gsub("ZT(\\d+)", "\\1", .) %>% as.integer()
+        data.frame(group = "motif", ZT = ZT_, measure = mean_, sd = sd_)
+      }, .keep = T) %>% do.call(rbind, .) -> df_1
+    
+    max(df_1$measure) - min(df_1$measure) -> range_original
+    df_1 %>% 
+      dplyr::mutate(measure = scales::rescale(measure, to = c(0,1))) %>% 
+      dplyr::mutate(sd = sd/range_original) -> df_1
+    
+    rbind(df_, df_1) -> df_
+    df_ %>% 
+      ggplot(aes(x = ZT, y = measure, group = group, color = group, fill = group)) + 
+      geom_line() + 
+      geom_ribbon(aes(ymin = measure-sd, ymax = measure+sd), alpha = 0.2, color = NA) + 
+      scale_x_continuous(breaks = c(2,6,10,14,18,22)) + 
+      ylab("relative value (TF expr, motif score, \nCRE accessibility, gene expr)") -> p
+    p + ggtitle(title_) -> p
+    p + scale_color_manual(values = c(peak = "#f3766e", target_gene = "#2ab34b", TF = "#7094cd", motif = "#a781ba")) -> p
+    p + scale_fill_manual(values = c(peak = "#f3766e", target_gene = "#2ab34b", TF = "#7094cd", motif = "#a781ba")) -> p
+  }) -> p_list_
+
+patchwork::wrap_plots(p_list_[c("MEF2D", "PPARD", "NR5A2", "NFYB")], guides = "collect") #Supp Fig 22
+
 #Plot regulatory network of clock genes
 Core_clock_genes = c("Dbp", "Arntl", "Bhlhe40", "Bhlhe41", "Nfil3", "Rorc", "Rora", "Nr1d1", "Clock", "Npas2", "Cry1", "Ciart", "Per1", "Per2")
 TF_clock_genes = c("Dbp", "Arntl", "Bhlhe40", "Bhlhe41", "Nfil3", "Rora", "Rorc", "Nr1d1", "Clock", "Npas2")
