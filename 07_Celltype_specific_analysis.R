@@ -1087,6 +1087,30 @@ table(sc$cc_clusters)
 table(sc$cc_clusters, sc$group)
 dim(sc)
 
+# Generate MOTIF score 
+sc=sc[,sc$cc_clusters %in% names(which(apply(table(sc$cc_clusters, sc$group), 1, min)>50))]
+sc$cc_clusters=droplevels(sc$cc_clusters)
+table(sc$cc_clusters, sc$group)
+length(table(sc$cc_clusters)) # Total number of replicates after filtering
+sc$cluster=sc$cc_clusters
+
+sc@assays$MOTIF@data -> MOTIF_df
+unique(sc@meta.data$ZT) %>% 
+  gtools::mixedsort() %>% 
+#  .[1] %>% 
+  purrr::map(function(ZT_){
+    levels(sc@meta.data$cluster) %>% 
+#      .[1:2] %>% 
+      purrr::map(function(cluster_){
+        sc@meta.data %>% dplyr::filter(ZT == ZT_, cluster == cluster_) -> df_
+        sprintf("ZT=%s, cluster=%s, n_cells = %s", ZT_, cluster_, nrow(df_))
+        cells_ = rownames(df_)
+        MOTIF_df[,cells_] %>% rowMeans() %>% as.data.frame() %>% "colnames<-"(., sprintf("ZT%s_REP%s", ZT_, cluster_))
+      }) %>% do.call(cbind, .)
+  }) %>% do.call(cbind, .) -> MOTIF_df_1
+sc@assays$ATAC@motifs@motif.names[rownames(MOTIF_df_1)] %>% unlist() %>% unname() -> rownames(MOTIF_df_1)
+rownames(MOTIF_df_1) %>% toupper() -> rownames(MOTIF_df_1)
+
 # Minimum number of cells per timepoint in each cluster: 50
 sc=sc[,sc$cc_clusters %in% names(which(apply(table(sc$cc_clusters, sc$group), 1, min)>50))]
 sc$cc_clusters=droplevels(sc$cc_clusters)
@@ -1180,6 +1204,117 @@ enriched.TF.motifs %>%
   ggplot(aes(x = group, y = freq, fill = group)) +
   geom_bar(stat = "identity", width = 1) +
   coord_polar(start = 0) #Fig_2F
+
+# Plot TF motif score
+color_list = list(
+  KLF15 = "#f15e5b",
+  KLF10 = "#f15e5b",
+  ARNTL = "#7caf41",
+  CLOCK = "#7caf41",
+  DBP = "#2fbec1",
+  NFIL3 = "#2fbec1",
+  RXRA = "#49a1da",
+  PPARD = "#49a1da",
+  RORC = "#9b77b5", 
+  NR1D1 = "#9b77b5" 
+)
+c("KLF15", "ARNTL", "DBP", "RXRA", "RORC", "KLF10", "CLOCK", "NFIL3", "PPARD", "NR1D1") %>% 
+  "names<-"(.,.) %>% 
+#  .[1] %>% 
+  map(function(TF_){
+    MOTIF_df_1[TF_, ] %>% pivot_longer(everything(), names_to = "group") %>% 
+      dplyr::mutate(ZT = gsub("(ZT\\d+)_.+", "\\1", group)) %>% 
+      group_by(ZT) %>% 
+      group_map(function(df_, y){
+        data.frame(ZT = y$ZT, Mean = mean(df_$value), SD = sd(df_$value))
+      }) %>% do.call(rbind, .) %>% dplyr::mutate(ZT = gsub("ZT(\\d+)", "\\1", ZT) %>% as.numeric()) %>% 
+      dplyr::arrange(ZT) -> df_
+    df_ %>% 
+      ggplot(aes(x = ZT, y = Mean)) + 
+      geom_line(color = color_list[[TF_]]) + 
+      geom_ribbon(aes(ymax = Mean+SD, ymin = Mean-SD), alpha = 0.2, fill = color_list[[TF_]]) + 
+      scale_x_continuous(breaks = seq(2,22,4)) +
+      theme_classic() + 
+      ggtitle(TF_) + 
+      ylab("Motif score")
+  }) -> p_motif_list
+
+patchwork::wrap_plots(p_motif_list, nrow = 2)
+
+color_list = list(
+  C2H2_Zinc_finger = "#f15e5b",
+  E_Box = "#7caf41",
+  D_Box = "#2fbec1",
+  C4_Zinc_finger = "#49a1da",
+  RORE = "#9b77b5" 
+)
+list(C2H2_Zinc_finger = c("KLF15", "KLF10"), 
+     E_Box = c("ARNTL", "CLOCK"), 
+     D_Box = c("DBP", "NFIL3"), 
+     C4_Zinc_finger = c("RXRA", "PPARD"), 
+     RORE = c("RORC", "NR1D1")) %>% 
+#  .[3] %>% 
+  map2(.x=.,.y=names(.),.f=function(genes_, group_){
+    p_motif_list[genes_] %>% 
+      map2(.x=.,.y=names(.),.f=function(p, gene_){
+        p$data %>% dplyr::mutate(Gene = gene_ )
+      }) %>% do.call(rbind, .) -> df_
+    print(color_list[[group_]])
+    df_ %>% 
+      ggplot(aes(x = ZT, y = Mean, group = Gene, linetype = Gene)) + 
+      geom_line(color = color_list[[group_]]) + 
+      geom_ribbon(aes(ymax = Mean+SD, ymin = Mean-SD), alpha = 0.2, color = NA, fill = color_list[[group_]]) + 
+      scale_x_continuous(breaks = seq(2,22,4)) +
+      theme_classic() + 
+      theme(legend.position = "top") + 
+      ylab("Motif score")
+  }) -> p_motif_list_1
+
+patchwork::wrap_plots(p_motif_list_1, nrow = 1) #Fig_2F
+
+library(JASPAR2020)
+library(TFBSTools)
+#opts <- list(species = 10090, all_versions = FALSE)
+opts <- list(tax_group = 'vertebrates', all_versions = FALSE)
+jaspar_db <- getMatrixSet(JASPAR2020, opts)
+jaspar_db[["MA0639.1"]]@matrixClass
+
+enriched.TF.motifs.mm10 %>% 
+  map(function(df_){
+    df_$motif -> motif_
+    motif_ %>% 
+      map(function(motif_){
+        jaspar_db[[motif_]]@matrixClass -> class_
+      }) %>% purrr::reduce(., c) -> class_
+    motif_ %>% 
+      map(function(motif_){
+        jaspar_db[[motif_]]@tags$family -> family_
+        if(is.null(family_)){family_ = "Unknown"}
+        return(family_)
+      }) %>% purrr::reduce(., c) -> family_
+    df_$class = class_
+    df_$family = family_
+#    print(c(nrow(df_), length(class_), length(family_)))
+    return(df_)
+  }) -> enriched.TF.motifs.mm10
+
+enriched.TF.motifs.mm10 %>% 
+  map(function(df_){
+    df_ %>% dplyr::filter(p.adjust < 0.05) -> df_
+    df_[1:5,] -> df_
+    class_ = df_$class %>% table() %>% sort(decreasing = TRUE) %>% head(5)
+    family_ = df_$family %>% table() %>% sort(decreasing = TRUE) %>% head(5)
+    list(class = class_, family = family_)
+  })
+
+enriched.TF.motifs.mm10$`ZT0-3` %>% dplyr::filter(grepl("KLF",motif.name)) %>% .$motif %>% .[c(1,8)] %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p1
+enriched.TF.motifs.mm10$`ZT0-3`[c(6,5), ]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p1
+enriched.TF.motifs.mm10$`ZT6-9`[c(11,12),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p2
+enriched.TF.motifs.mm10$`ZT9-12`[c(1,5),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p3
+enriched.TF.motifs.mm10$`ZT15-18`[c(5,11),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p4
+enriched.TF.motifs.mm10$`ZT15-18`[c(3,5),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p4
+enriched.TF.motifs.mm10$`ZT21-24`[c(1,4),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p5
+patchwork::wrap_plots(p1, p2, p3, p4, p5, nrow = 1) #Fig_2F
 
 ####
 
