@@ -1247,9 +1247,9 @@ load("~/Dropbox/singulomics/github_rda/TRIPOD/GSE155161_CHI-C_annotated.rda")
 load("~/Dropbox/singulomics/github_rda/TRIPOD/GSE39977/GSE39977_ChIP_timepoint_mat.rda")
 load("~/Downloads/trios_res_df_2.RData")
 trios_res_df_2 %>% as.data.frame() -> trios_res_df_2
-trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD", (CHI_C_validate==TRUE|ChIP_seq_validated==TRUE)) %>% 
-  dplyr::select(-c(peak_num, TF_num, model_1, peak_name, regulation, gtf_annotation, gtf_gene, CHI_C_gene)) %>% 
-  {write.csv(., file="~/Downloads/trios_res_df_2.csv", row.names = F, quote = F)}
+#trios_res_df_2 %>% dplyr::filter(model_1 == "TRIPOD", (CHI_C_validate==TRUE|ChIP_seq_validated==TRUE)) %>% 
+#  dplyr::select(-c(peak_num, TF_num, model_1, peak_name, regulation, gtf_annotation, gtf_gene, CHI_C_gene)) %>% 
+#  {write.csv(., file="~/Downloads/trios_res_df_2.csv", row.names = F, quote = F)}
 
 #load(file='~/Dropbox/singulomics/github_rda/TRIPOD/list_trios_res.rda')
 load(file='~/Dropbox/singulomics/github_rda/TRIPOD/metacell.rna.rda')
@@ -1550,8 +1550,6 @@ combine_ChIP_CHI_C = function(ChIP_plot, CHI_C_plot){
   return(p)
 }
 
-trios_res_df_2
-
 trios_res_df_2 %>% 
   dplyr::filter(model_1 == "TRIPOD", TF %in% Core_clock_genes, gene %in% Core_clock_genes) %>% 
   dplyr::filter((CHI_C_validate == "TRUE")|(ChIP_seq_validated == "TRUE")) %>% 
@@ -1583,7 +1581,7 @@ trios_res_df_2 %>%
   } -> p_list
 
 
-patchwork::wrap_plots(p_list$Arntl[[1]], p_list$Clock[[1]], p_list$Npas2[[7]], p_list$Rorc[[3]], ncol = 2, guides = "collect") # Fig 4B
+patchwork::wrap_plots(p_list$Arntl[[1]], p_list$Clock[[1]], p_list$Npas2[[7]], p_list$Rorc[[3]], ncol = 2, guides = "collect") # Fig 5B
 
 #add motif score to the plot
 library(Seurat)
@@ -1703,13 +1701,13 @@ list(ARNTL = p_list$Arntl[[1]], CLOCK = p_list$Clock[[1]],
     p + scale_color_manual(values = c(peak = "#f3766e", target_gene = "#2ab34b", TF = "#7094cd", motif = "#a781ba")) -> p
     p + scale_fill_manual(values = c(peak = "#f3766e", target_gene = "#2ab34b", TF = "#7094cd", motif = "#a781ba")) -> p
   }) -> p_list_
-patchwork::wrap_plots(p_list_[1:4], ncol = 4, nrow = 1, guides = "collect") #Fig 4B
-p_list_[[5]] #Fig 4C
+patchwork::wrap_plots(p_list_[1:4], ncol = 4, nrow = 1, guides = "collect") #Fig 5B
+p_list_[[5]] #Fig 5C
 
 
 Plot_ChIP(TF = "Bmal1", Peak = "chr1-39102368-39103276") -> p1
 Plot_CHI_C(target_gene = "Npas2", Peak = "chr1-39102368-39103276") -> p2
-combine_ChIP_CHI_C(ChIP_plot = p1, CHI_C_plot = p2) -> p3 #Fig 4C
+combine_ChIP_CHI_C(ChIP_plot = p1, CHI_C_plot = p2) -> p3 #Fig 5C
 
 library(BSgenome.Mmusculus.UCSC.mm10)
 gr = GRanges(seqnames = "chr1", ranges = IRanges(start = 39102368, end = 39103276))
@@ -1738,7 +1736,7 @@ ggplot(sequence_df, aes(x = position, y = 0, label = nucleotide, color = motif))
   ylab("") + 
   xlab("chr1") + 
   scale_x_continuous(breaks =  seq(sequence_df$position[1], sequence_df$position[nrow(sequence_df)], by = 10)) + 
-  coord_fixed(ratio = 20) -> p_atac_peak #Fig 4C
+  coord_fixed(ratio = 20) -> p_atac_peak #Fig 5C
 
 #Plot Bmal1 KO vs WT (Npas2 and Cry1)
 readxl::read_xlsx(path = "~/Dropbox/singulomics/MS22_Greenwell_Total_Nuclear_polysome_BMKO_v1.xlsx", sheet = 1) -> df_
@@ -1817,7 +1815,7 @@ list(WT = Bmal1_WT_df, KO = Bmal1_KO_df) %>%
   }) %>% do.call(rbind, .) %>% 
   ggplot(aes(x = ZT, y = expression, fill = group, color = group)) +
   geom_line() + 
-  geom_ribbon(aes(ymin = expression - sd, ymax = expression + sd), alpha = 0.3, color = NA) #Fig 4C
+  geom_ribbon(aes(ymin = expression - sd, ymax = expression + sd), alpha = 0.3, color = NA) #Fig 5C
 
 res_pval_KO %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Per1")
 res_pval_WT %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Per1")
@@ -1837,7 +1835,7 @@ list(WT = Bmal1_WT_df, KO = Bmal1_KO_df) %>%
   }) %>% do.call(rbind, .) %>% 
   ggplot(aes(x = ZT, y = expression, fill = group, color = group)) +
   geom_line() + 
-  geom_ribbon(aes(ymin = expression - sd, ymax = expression + sd), alpha = 0.3, color = NA) #Fig 4C
+  geom_ribbon(aes(ymin = expression - sd, ymax = expression + sd), alpha = 0.3, color = NA) #Fig 5C
 
 trios_res_df_2 %>% 
   dplyr::filter(model_1 == "TRIPOD", gene_cauchy_BH.Q < 0.05, TF_cauchy_BH.Q < 0.05, peak_cauchy_BH.Q < 0.05) %>% 
@@ -1889,7 +1887,7 @@ trios_res_df_3 %>% dplyr::filter(TF == "Arntl") %>%
       geom_ribbon(aes(xmin = (TF_phase-12)-2.5, xmax = (TF_phase-12)+2.5), fill = "green", alpha = 0.2) + 
       theme_classic() + 
       ggtitle(sprintf("r=%s", cor_))
-  } #Fig 4D
+  } #Fig 5D
 
 trios_res_df_3 %>% dplyr::filter(TF == "Nr1d1") %>% 
   dplyr::filter(gene %in% Core_clock_genes) %>% View()
@@ -1926,7 +1924,7 @@ trios_res_df_3 %>% dplyr::filter(TF == "Nr1d1") %>%
       geom_ribbon(aes(xmin = (TF_phase+12)-2.5, xmax = (TF_phase+12)+2.5), fill = "green", alpha = 0.2) + 
       theme_classic() + 
       ggtitle(sprintf("r=%s", cor_))
-  } #Fig 4D
+  } #Fig 5D
 
 #Plot Anrtl's TFs
 Arntl_TF = c("Mef2c", "Klf1", "Nr5a2", "Mef2d", "Foxa3", "Esrra", "Hnf4a", "Mef2a", "Nfyb", "Ppard")
@@ -2224,7 +2222,7 @@ to_plot$newstate=factor(to_plot$newstate, levels= c('Transcription', 'TSS',
 library(ggplot2)
 p=ggplot(data=to_plot, aes(x=newstate, y=Percentage, fill=group)) +
   geom_bar(stat="identity", color="black", position=position_dodge())+
-  theme_minimal() + xlab("chromHMM states")+ scale_fill_manual(values=c('#999999','#E69F00')) #Fig 4E
+  theme_minimal() + xlab("chromHMM states")+ scale_fill_manual(values=c('#999999','#E69F00')) #Fig 5E
 
 # Plot CHI-C validation
 load(file = "~/Dropbox/singulomics/github_rda/TRIPOD/GSE155161_CHI-C_annotated.rda")
