@@ -703,6 +703,66 @@ list_summary %>%
       ggtitle(gene_)
   }) %>% patchwork::wrap_plots(., ncol = 2) -> p_fish #Fig_3F
 
+list_tmp %>% 
+  purrr::map2(.x=.,.y=names(.),.f=function(x,y){
+    gene_ = y
+    x %>%
+      purrr::map2(.x=.,.y=names(.),.f=function(x,y){
+        ZT_ = y
+        list_ = x
+        1:length(list_) %>% 
+          "names<-"(., sprintf("image_%s", .)) %>% 
+          purrr::map(function(i){
+            
+            list_tmp_1[[gene_]][[ZT_]][[i]] -> model
+            model$parameters$mean -> mean_
+            model$parameters$variance$sigmasq -> variance_
+            model$parameters$pro -> proportions_
+            
+            x_min <- min(mean_) - 3 * sqrt(max(variance_))
+            x_max <- max(mean_) + 3 * sqrt(max(variance_))
+            x_values <- seq(x_min, x_max, length.out = 1000)
+            
+            density_data <- data.frame(x = x_values)
+            for (k in 1:length(mean_)) {
+              density_data[[paste0("Component", k)]] <- proportions_[k] * dnorm(x_values, mean = mean_[k], sd = sqrt(variance_[k]))
+            }
+            density_data$TotalDensity <- rowSums(density_data[ , paste0("Component", 1:length(mean_))])
+            density_data
+            
+            density_long <- gather(density_data, key = "Component", value = "Density", -x)
+            density_long %>% dplyr::filter(Component != "TotalDensity") -> density_long
+            density_long %>% dplyr::filter(x >= 0) -> density_long
+            
+            list_[[i]] -> df_
+            df_$cluster = factor(df_$cluster)
+            
+            df_ %>% 
+              ggplot(aes(x = IntDen)) + 
+#              geom_density() +
+              geom_histogram(aes(y = ..density..), bins = 50, fill = "white", alpha = 0.3, position = "dodge", color = "black") + 
+              geom_line(data = density_long, aes(x = x, y = Density, color = Component), size = 1) + 
+              ggtitle(sprintf("%s %s", gene_, ZT_)) + 
+              theme_minimal()
+          })
+      })
+  }) -> p_list_5
+
+c("Arntl", "Per1") %>% 
+  "names<-"(.,.) %>% 
+  purrr::map(function(x){
+    gene_ = x
+    c("ZT0", "ZT03", "ZT06", "ZT09", "ZT12", "ZT15", "ZT18", "ZT21") %>% 
+      purrr::map(function(x){
+        ZT_ = x
+        p_list_5[[gene_]][[ZT_]][["image_1"]] -> p
+      }) -> p_list
+    patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p
+  }) -> p_list_6
+
+p_list_6$Arntl #Supp Fig 26
+p_list_6$Per1 #Supp Fig 26
+
 # 14. Burst frequency (Nr1d1, Cry1, Bmal1) ----
 setwd("~/Dropbox/Research/singulomics/")
 # Burst frequency and size from Phillips et al. pulled by Jay Suh
