@@ -612,7 +612,90 @@ list(
       xlab(NULL) + ylab(NULL) + 
       theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
   }) -> p_list
-patchwork::wrap_plots(p_list, nrow = 3) #Fig_2A ----
+patchwork::wrap_plots(p_list, nrow = 3) #Fig_2A and Supp Fig_12B ----
+
+#Plot RNA expression and ATAC activity (line plots) (cell type specific)
+c("replicate_3", "replicate_4", "replicate_5", "replicate_10") %>% 
+  "names<-"(.,.) %>% 
+  .[4] %>%
+  map(function(x){
+    replicate_ = x
+    c("RNA", "gene_activity") %>% 
+      "names<-"(.,.) %>% 
+      #  .[1] %>% 
+      map(function(x){
+        type_ = x 
+        list.files(sprintf("~/Dropbox/singulomics/github_rda/output/Celltype_specific/Raw_data_downsampled/%s", replicate_), 
+                   pattern = "\\.csv", full.names = T) %>% 
+          {.[grep("_1_", .)]} %>%
+          {.[grepl(type_, .)]} -> files_
+        c("Hepatocytes", "Endothelial_cells", "Fibroblasts", "Kupffer_cells") %>% 
+          "names<-"(.,.) %>% 
+          #      .[1] %>%
+          map(function(x){
+            celltype_ = x
+            files_ %>% {.[grepl(celltype_, .)]} %>% gtools::mixedsort() -> files_
+            n = length(files_)
+            files_ %>% map(function(x){
+              print(x)
+              read.csv(x, head = T, stringsAsFactors = F) -> df_
+              df_ %>% column_to_rownames("Gene") -> df_
+            }) %>% purrr::reduce(., `+`) -> df_
+            df_/n -> df_
+            c("Arntl", "Bhlhe40", "Bhlhe41", "Clock", "Dbp", "Nfil3", "Nr1d1", "Rorc", 
+              "Cry1", "Ciart", "Per1", "Per2", "Npas2") -> se_genes
+            df_[se_genes,] %>% drop_na() -> df_
+            df_ %>% rownames_to_column("Gene") %>% 
+              pivot_longer(cols = -Gene, names_to = "ZT", values_to = "value") -> df_
+            df_ %>% mutate(REP = gsub(".+_REP(\\d+)", "\\1", ZT) %>% as.numeric()) -> df_
+            df_ %>% mutate(ZT = gsub("ZT(\\d+?)_.+", "\\1", ZT) %>% as.numeric()) -> df_
+            df_ %>% mutate(celltype = celltype_, .after = "Gene") -> df_
+          }) %>% do.call(rbind, .) -> df_
+        
+        unique(df_$Gene) %>% 
+          "names<-"(.,.) %>% 
+          map(function(x){
+            gene_ = x
+            df_ %>% filter(Gene == gene_) -> df_
+          })
+      }) -> list_tmp_1
+  }) -> list_tmp_1
+
+list_tmp_1 %>% 
+  map2(.x=.,.y=names(.),.f=function(x,y){
+    replicate_ = y
+    x %>% 
+      map2(.x=.,.y=names(.),.f=function(x,y){
+        type_ = y
+        x %>% 
+          map2(.x=.,.y=names(.),.f=function(x,y){
+            gene_ = y
+            
+            df_ = x
+            
+            df_ %>% 
+              group_by(Gene, celltype, ZT) %>% 
+              summarise(Mean = mean(value), SD = sd(value)) -> df_
+            df_ %>% 
+              ggplot(aes(x = ZT, y = Mean, color = celltype)) + 
+              geom_line() + 
+              geom_point() -> p
+            p + geom_errorbar(aes(ymin=Mean-SD, ymax=Mean+SD), width=.2,
+                              position=position_dodge(0.05)) -> p
+            
+            if (type_ == "RNA"){
+              p + ylab("Normalized gene expression") -> p
+              p + ggtitle(gene_) -> p
+            }else{
+              p + ylab("Normalized gene activity") -> p
+              p + ggtitle(gene_) -> p
+            }
+          }) 
+      }) -> p_list      
+  }) -> p_list
+
+p_list_1 = c(p_list$replicate_10$RNA, p_list$replicate_10$gene_activity)
+ggpubr::ggarrange(plotlist = p_list_1, ncol = 13, nrow = 2, common.legend = T, legend = "top") -> p_clock_gene_line_plot # Supp Fig_10
 
 # 4. Draw violin plot for celltype specific marker genes (RNA expression and ATAC activity) ----
 
@@ -964,7 +1047,7 @@ wrap_plots(p1, p1_1, ncol = 1, nrow = 2) #Fig_2B
 wrap_plots(p2, p2_2, ncol = 1, nrow = 2) #Fig_2B
 
 list(RNA = ggvenn_list$RNA$Hepatocytes, ATAC_activity = ggvenn_list$gene_activity$Hepatocytes) %>% 
-  ggvenn::ggvenn() -> p_3 #Fig_2D
+  ggvenn::ggvenn() -> p_3
 
 ####
 
@@ -1203,7 +1286,7 @@ enriched.TF.motifs %>%
   } %>% 
   ggplot(aes(x = group, y = freq, fill = group)) +
   geom_bar(stat = "identity", width = 1) +
-  coord_polar(start = 0) #Fig_2F
+  coord_polar(start = 0) #Fig_2H
 
 # Plot TF motif score
 color_list = list(
@@ -1270,7 +1353,7 @@ list(C2H2_Zinc_finger = c("KLF15", "KLF10"),
       ylab("Motif score")
   }) -> p_motif_list_1
 
-patchwork::wrap_plots(p_motif_list_1, nrow = 1) #Fig_2F
+patchwork::wrap_plots(p_motif_list_1, nrow = 1) #Fig_2H
 
 library(JASPAR2020)
 library(TFBSTools)
@@ -1314,7 +1397,7 @@ enriched.TF.motifs.mm10$`ZT9-12`[c(1,5),]$motif %>% MotifPlot(object = sc, motif
 enriched.TF.motifs.mm10$`ZT15-18`[c(5,11),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p4
 enriched.TF.motifs.mm10$`ZT15-18`[c(3,5),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p4
 enriched.TF.motifs.mm10$`ZT21-24`[c(1,4),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p5
-patchwork::wrap_plots(p1, p2, p3, p4, p5, nrow = 1) #Fig_2F
+patchwork::wrap_plots(p1, p2, p3, p4, p5, nrow = 1) #Fig_2H
 
 ####
 
@@ -1577,3 +1660,386 @@ addWorksheet(wb, "TF_motif_score")
 writeData(wb, sheet = "TF_motif_score", x = output_TF.motif)
 
 saveWorkbook(wb, "~/Downloads/00_Supp_Table_4_1.xlsx", overwrite = TRUE)
+
+# 10. Hepatocytes rhythmicity (RNA expression and ATAC activity) ----
+library(Seurat)
+library(Signac)
+library(EnsDb.Mmusculus.v79) # mm10
+library(GenomeInfoDb)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(stringr)
+library(biovizBase)
+library(SingleCellExperiment)
+library(mbkmeans)
+library(tidyverse)
+library(gridExtra)
+library(ggpubr)
+library(MetaCycle)
+library(future)
+library(furrr)
+
+#source('github/runJTK.R')
+
+
+# Load in the integrated and QC'ed data
+rm(list=ls())
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+readRDS("~/Dropbox/singulomics/github_rda/Hepatocytes_cellnames.rds") -> hepatocytes_cells
+
+sc <- sc[,hepatocytes_cells]
+
+DimPlot(sc, group.by = "ZT", label = TRUE, reduction = "multicca.umap", repel = TRUE)
+DefaultAssay(sc) <- "SCT"
+
+# Choose resolution: do not need too many metacells, especially because we need to characterize the distributions of cells within the metacells
+resolution=0.5
+sc <- FindNeighbors(object = sc, reduction = 'multicca.pca', dims = 1:50, verbose = FALSE, graph.name=c('multicca_nn','multicca_snn'))
+sc <- FindClusters(object = sc, algorithm = 1, verbose = FALSE, graph.name='multicca_snn',
+                   resolution=resolution)
+DimPlot(sc, group.by = "seurat_clusters", label = TRUE, reduction = "multicca.umap", repel = TRUE) -> P_UMAP
+P_UMAP + theme_classic() + ggtitle(NULL) -> P_UMAP
+
+sc=sc[,!grepl('KO',sc$group)] # Remove the knockout to look at circadian rhythmicity
+sc$group=droplevels(sc$group)
+table(sc$group)
+
+sc$ZT=as.numeric(gsub('ZT','',sc$ZT)) # Change ZT to be numeric time
+sc=sc[,sc$celltype=='Hepatocytes'] # Keep only hepatocytes
+table(sc$ZT)
+table(sc$celltype)
+
+sc$cc_cluster=NULL
+sc$cc_clusters=sc$seurat_clusters
+table(sc$cc_clusters)
+table(sc$cc_clusters, sc$group)
+dim(sc)
+
+# Minimum number of cells per timepoint in each cluster: 50
+sc=sc[,sc$cc_clusters %in% names(which(apply(table(sc$cc_clusters, sc$group), 1, min)>50))]
+sc$cc_clusters=droplevels(sc$cc_clusters)
+table(sc$cc_clusters, sc$group)
+length(table(sc$cc_clusters)) # Total number of replicates after filtering
+sc$cluster=sc$cc_clusters
+
+#Raead RNA mean expression matrix
+read.csv(file = "~/Dropbox/singulomics/github_rda/output/Beyond_Mean/RNA_Mean.csv", header = T, stringsAsFactors = F) -> RNA_Mean
+####
+
+#Generate normalized ATAC activity matrix
+sc@assays[["ATAC"]]@fragments[[1]]@path <- "~/Dropbox/singulomics/aggregate_analysis/atac_fragments.tsv.gz"
+DefaultAssay(sc) <- "ATAC"
+gene.activities <- GeneActivity(sc, extend.upstream = 2000, biotypes = NULL)
+
+gene.activities %>% colSums() %>% median() -> gene_activity_median
+
+gene.activities %>% 
+  as.data.frame() %>%
+  mutate(across(everything(), function(x){(x/sum(x))*gene_activity_median})) %>% 
+  as.matrix() -> gene_activity_norm
+gene_activity_norm %>% as.data.frame() -> gene_activity_norm
+
+sc@meta.data$cluster %>% 
+  as.character() %>%
+  as.numeric() %>%
+  unique() %>% 
+  gtools::mixedsort() %>% 
+  "names<-"(.,.) %>% 
+  #  .[1:2] %>% 
+  map(function(x){
+    cluster_ = x
+    sc@meta.data %>% dplyr::filter(cluster==cluster_) -> df_
+    seq(2,22,4) %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        ZT_ = x
+        df_ %>% dplyr::filter(ZT==ZT_) -> df_
+        print(nrow(df_))
+        rownames(df_) -> cellnames
+        gene_activity_norm[ ,cellnames] -> df_
+        rowMeans(df_) %>% 
+          as.data.frame() %>% 
+          "colnames<-"(., sprintf("ZT%s_REP%s", ZT_, cluster_+1)) -> df_
+        df_ %>% rownames_to_column("Gene") -> df_
+      }) %>% purrr::reduce(., left_join, by="Gene") -> df_
+  }) %>% purrr::reduce(., full_join, by="Gene") %>% 
+  {.[, c("Gene", colnames(.)[-1] %>% gtools::mixedsort())]} -> Gene_Activity_Mean
+####
+
+intersected_genes = intersect(RNA_Mean$Gene, Gene_Activity_Mean$Gene)
+length(intersected_genes) #15159
+RNA_Mean %>% column_to_rownames("Gene") %>% .[intersected_genes,] %>% rownames_to_column("Gene") -> RNA_Mean
+Gene_Activity_Mean %>% column_to_rownames("Gene") %>% .[intersected_genes,] %>% rownames_to_column("Gene") -> Gene_Activity_Mean
+
+write.csv(RNA_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", row.names = F, quote = F)
+write.csv(Gene_Activity_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean.csv", row.names = F, quote = F)
+
+
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+
+radian_to_phase = function(radian){
+  phase = (radian/(2*pi))*24
+  return(phase)
+}
+
+res_RNA_Mean = cyclic_HMP(raw_data = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", minper_ = 24)
+res_RNA_Mean %>% 
+  dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
+  dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
+  recal_cauchy_p_and_hmp(.) -> res_RNA_Mean
+write.csv(res_RNA_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean_res.csv", row.names = F, quote = F, col.names = T)
+
+res_Gene_Activity_Mean = cyclic_HMP(raw_data = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean.csv", minper_ = 24)
+res_Gene_Activity_Mean %>% 
+  dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
+  dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
+  recal_cauchy_p_and_hmp(.) -> res_Gene_Activity_Mean
+write.csv(res_Gene_Activity_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean_res.csv", row.names = F, quote = F, col.names = T)
+
+list(`RNA expression` = res_RNA_Mean %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
+     `ATAC activity` = res_Gene_Activity_Mean %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene) %>% 
+  ggvenn::ggvenn() -> p_ggvenn #Fig_2D
+
+# Compare phase between RNA expression and ATAC activity (circacompare)
+intersect(
+res_RNA_Mean %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
+res_Gene_Activity_Mean %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene
+) -> intersected_genes
+length(intersected_genes) #4413
+
+RNA_Mean %>% pivot_longer(-Gene, names_to = "time") %>% "colnames<-"(., c("Gene", "time", "measure")) %>% 
+  dplyr::mutate(group = "RNA") %>% dplyr::mutate(time = gsub("ZT(\\d+?)_.+", "\\1", time) %>% as.numeric()) -> RNA_Mean_1
+Gene_Activity_Mean %>% pivot_longer(-Gene, names_to = "time") %>% "colnames<-"(., c("Gene", "time", "measure")) %>% 
+  dplyr::mutate(group = "Gene_Activity") %>% dplyr::mutate(time = gsub("ZT(\\d+?)_.+", "\\1", time) %>% as.numeric()) -> Gene_Activity_Mean_1
+
+rbind(RNA_Mean_1, Gene_Activity_Mean_1) -> df_RNA_ATAC
+df_RNA_ATAC %>% dplyr::filter(Gene %in% intersected_genes) -> df_RNA_ATAC
+
+circacompare::circacompare(x = df_RNA_ATAC %>% dplyr::filter(Gene == "Clock"), col_time = "time", col_group = "group", col_outcome = "measure")
+
+i = 0
+unique(df_RNA_ATAC$Gene) %>% 
+#  .[2750:2760] %>% 
+  map(function(x){
+    gene_ = x
+    i <<- i+1
+    print(i)
+    df_RNA_ATAC %>% dplyr::filter(Gene == gene_) -> df_
+#    circacompare::circacompare(x = df_, col_time = "time", col_group = "group", col_outcome = "measure") -> res
+    res = tryCatch({circacompare::circacompare(x = df_, col_time = "time", col_group = "group", col_outcome = "measure")}, 
+                   error = function(e){
+                    NA
+                   })
+    
+    
+    if (all(is.na(res))){
+      NA -> gene_activity_amp
+      NA -> RNA_amp
+      NA -> amp_diff
+      NA -> amp_diff_p
+      NA -> gene_activity_phase
+      NA -> RNA_phase
+      NA -> phase_diff
+      NA -> phase_diff_p 
+    }else{
+      res$summary[7, 2] -> gene_activity_amp
+      res$summary[8, 2] -> RNA_amp
+      res$summary[9, 2] -> amp_diff
+      res$summary[10, 2] -> amp_diff_p
+      res$summary[11, 2] -> gene_activity_phase
+      res$summary[12, 2] -> RNA_phase
+      res$summary[13, 2] -> phase_diff
+      res$summary[14, 2] -> phase_diff_p      
+    }
+
+    data.frame(Gene = gene_, RNA_phase = RNA_phase, gene_activity_phase = gene_activity_phase, 
+               phase_diff = phase_diff, phase_diff_p = phase_diff_p, 
+               RNA_amp = RNA_amp, gene_activity_amp = gene_activity_amp, 
+               Amp_diff = amp_diff, Amp_diff_p = amp_diff_p)
+  }) %>% do.call(rbind, .) -> circacompare_res
+
+circacompare_res %>% drop_na() -> circacompare_res
+save(circacompare_res, df_RNA_ATAC, file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Circacompare_res.rda")
+
+
+readRDS("~/Dropbox/singulomics/github_rda/gene.ref.rds") -> gene.ref
+gene.ref %>% as.data.frame() -> gene.ref
+
+gene.ref %>% dplyr::select(gene_name, gene_biotype, seqnames, width) %>% 
+  "rownames<-"(., NULL) %>% 
+  {
+    df_ = .
+    left_join(x = circacompare_res, y = df_, by = c("Gene"="gene_name"))
+  } -> circacompare_res
+
+circacompare_res %>% 
+  dplyr::mutate(group = case_when(
+    (phase_diff > 0)&(phase_diff_p < 0.05) ~ "pos_shift",
+    (phase_diff < 0)&(phase_diff_p < 0.05) ~ "neg_shift",
+    TRUE ~ "not_sig"
+  )) %>% dplyr::mutate(group = factor(group, levels = c("pos_shift", "neg_shift", "not_sig"))) -> circacompare_res
+save(circacompare_res, df_RNA_ATAC, file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Circacompare_res.rda")
+
+clock_genes = c("Arntl", "Bhlhe40", "Bhlhe41", "Clock", "Npas2", "Dbp", "Nfil3", "Nr1d1", "Rorc", "Cry1", "Ciart", "Per1", "Per2")
+circacompare_res %>% 
+  {
+    df_ = .
+    n_genes = nrow(df_)
+    n_gene_pos_shift = df_ %>% dplyr::filter(phase_diff > 0, phase_diff_p < 0.05) %>% nrow()
+    n_gene_neg_shift = df_ %>% dplyr::filter(phase_diff < 0, phase_diff_p < 0.05) %>% nrow()
+    mean_phase_shift = df_ %>% dplyr::filter(phase_diff_p < 0.05) %>% .$phase_diff %>% mean() %>% round(., 3)
+    df_ %>% 
+      dplyr::mutate(group = case_when(
+        (phase_diff > 0)&(phase_diff_p < 0.05) ~ "pos_shift",
+        (phase_diff < 0)&(phase_diff_p < 0.05) ~ "neg_shift",
+        TRUE ~ "not_sig"
+      )) %>% dplyr::mutate(group = factor(group, levels = c("pos_shift", "neg_shift", "not_sig"))) -> df_
+    
+    df_ %>% 
+    ggplot(aes(x = phase_diff, y = -log(phase_diff_p, 10), color = group)) + 
+      geom_point() + 
+      geom_hline(yintercept = 1.301, color = "red") + 
+      geom_vline(xintercept = 0, color = "red") + 
+      ylab("-log10(pvalue)") +
+      xlab("phase(RNA-ATAC_activity)") + 
+      ggtitle(sprintf("Total %s genes, Pos_phase_shfit:%s, Neg_phase_shfit:%s\nMean_phase_shift:%shr", n_genes, n_gene_pos_shift, n_gene_neg_shift, mean_phase_shift)) + 
+      theme_classic() -> p
+    
+    p + geom_text(data = subset(df_, Gene %in% clock_genes), aes(label = Gene), vjust = -1) -> p
+   p 
+  } -> p_volcano
+
+
+circacompare_res %>% 
+  dplyr::mutate(gene_activity_phase = case_when(
+    RNA_phase - gene_activity_phase > 12 ~ gene_activity_phase+24,
+    RNA_phase - gene_activity_phase < -12 ~ gene_activity_phase-24,
+    TRUE ~ gene_activity_phase
+  )) %>% 
+  dplyr::mutate(group = case_when(
+    (phase_diff > 0)&(phase_diff_p < 0.05) ~ "pos_shift",
+    (phase_diff < 0)&(phase_diff_p < 0.05) ~ "neg_shift",
+    TRUE ~ "not_sig"
+  )) %>% dplyr::mutate(group = factor(group, levels = c("pos_shift", "neg_shift", "not_sig"))) %>% 
+  {
+    df_ = .
+    cor(x = df_$RNA_phase, y = df_$gene_activity_phase, method = "pearson") %>% round(.,2) -> cor_
+    
+    df_ %>% 
+    ggplot(aes(x = RNA_phase, y = gene_activity_phase, color = group)) + 
+      geom_point() + 
+      geom_abline(color = "red") + 
+      ylab("Phase (ATAC_activity)") +
+      xlab("phase (RNA_expression)") + 
+      theme_classic() + 
+      ggtitle(sprintf("r=%s", cor_)) -> p
+    
+    p + geom_text(data = subset(df_, Gene %in% clock_genes), aes(label = Gene), vjust = -1) -> p
+    p
+  } -> p_cor #Fig_2E
+
+i = 0
+circacompare_res$Gene %>% 
+#  .[1:2] %>% 
+  map(function(gene_){
+    i <<- i+1
+    print(i)
+    df_RNA_ATAC %>% dplyr::filter(Gene == gene_) -> df_
+    df_ %>% dplyr::filter(group == "RNA") %>% .$measure -> RNA
+    df_ %>% dplyr::filter(group == "Gene_Activity") %>% .$measure -> Gene_Activity
+    cor.test(RNA, Gene_Activity, method = "pearson") -> cor_pearson
+    cor.test(RNA, Gene_Activity, method = "spearman") -> cor_spearman
+    cor_pearson$p.value -> pearson_pval
+    cor_spearman$p.value -> spearman_pval
+    cor_pearson$estimate -> pearson_r
+    cor_spearman$estimate -> spearman_r 
+    data.frame(Gene = gene_, pearson_r = pearson_r, pearson_pval = pearson_pval, spearman_r = spearman_r, spearman_pval = spearman_pval)
+  }) %>% do.call(rbind, .) %>% "rownames<-"(., NULL) -> cor_df
+
+left_join(x = circacompare_res, y = cor_df, by = "Gene") -> circacompare_res
+
+circacompare_res$group %>% unique() %>% as.character() %>% 
+  map(function(group_){
+    circacompare_res %>% dplyr::filter(group == group_) -> df_
+    data.frame(group = group_, gene_length = df_$width)
+  }) %>% do.call(rbind, .) %>% 
+  {
+    df_ = .
+    df_$group = factor(df_$group, levels = c("pos_shift", "neg_shift", "not_sig"))
+    print(pairwise.t.test(df_$gene_length, df_$group, pool.sd = F))
+    print(pairwise.wilcox.test(df_$gene_length, df_$group, pool.sd = F))
+    df_ %>% dplyr::mutate(kb = gene_length/1000)
+  } %>% 
+  ggplot(aes(x = group, y = kb, fill = group)) + 
+  geom_boxplot() + 
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") + 
+  scale_y_break(breaks = c(75,400), scales = 0.4) + 
+  ylab("Gene length (Kb)") + 
+  theme_classic() -> p_gene_length #Fig_2G
+
+  pairwise.t.test(circacompare_res$width, circacompare_res$group, pool.sd = F)
+
+left_join(
+  x = res_RNA_Mean %>% dplyr::select(Gene, MetaCycle_meta2d_rAMP, MetaCycle_meta2d_Base) %>% column_to_rownames("Gene") %>% "colnames<-"(., sprintf("RNA_%s", colnames(.))) %>% rownames_to_column("Gene"), 
+  y = res_Gene_Activity_Mean %>% dplyr::select(Gene, MetaCycle_meta2d_rAMP, MetaCycle_meta2d_Base) %>% column_to_rownames("Gene") %>% "colnames<-"(., sprintf("Gene_activity_%s", colnames(.))) %>% rownames_to_column("Gene"), 
+  by = "Gene"
+) %>% 
+  left_join(x = circacompare_res, y = ., by = "Gene") -> circacompare_res
+
+circacompare_res %>% 
+  {
+    df_ = .
+    print(pairwise.t.test(df_$RNA_MetaCycle_meta2d_rAMP, df_$group, pool.sd = F))
+    print(pairwise.wilcox.test(df_$RNA_MetaCycle_meta2d_rAMP, df_$group, pool.sd = F))
+    df_
+  } %>% 
+  ggplot(aes(x = group, y = RNA_MetaCycle_meta2d_rAMP , fill = group)) + 
+  geom_boxplot() +
+  scale_y_break(breaks = c(0.25,1), scales = 0.4) + 
+  theme_classic() + 
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") + 
+  ylab("rAMP (RNA expression)") #Fig_2G
+
+clock_genes = c("Arntl", "Bhlhe40", "Bhlhe41", "Clock", "Npas2", "Dbp", "Nfil3", "Nr1d1", "Rorc", "Cry1", "Ciart", "Per1", "Per2")
+clock_genes[clock_genes %in% unique(circacompare_res$Gene)] %>% 
+  "names<-"(.,.) %>% 
+#  .[1] %>%
+  map(function(gene_){
+    df_RNA_ATAC %>% dplyr::filter(Gene == gene_) -> df_
+    df_RNA = df_ %>% dplyr::filter(group == "RNA")
+    df_gene_activty = df_ %>% dplyr::filter(group == "Gene_Activity")
+    
+    min_max(x = df_gene_activty$measure, new_min = min(df_RNA$measure), new_max = max(df_RNA$measure)) -> scaled_gene_activity
+    df_RNA$measure %>% max()
+    df_gene_activty$measure = scaled_gene_activity$output
+    a = scaled_gene_activity$a
+    b = scaled_gene_activity$b
+    c = scaled_gene_activity$c
+    d = scaled_gene_activity$d
+    
+    RNA_phase = circacompare_res %>% dplyr::filter(Gene == gene_) %>% .$RNA_phase
+    Gene_activity_phase = circacompare_res %>% dplyr::filter(Gene == gene_) %>% .$gene_activity_phase
+    df_phase = data.frame(phase = c(RNA_phase, Gene_activity_phase)) %>% dplyr::mutate(group = c("RNA", "Gene_Activity"))
+    r_ = circacompare_res %>% dplyr::filter(Gene == gene_) %>% .$pearson_r %>% round(., 2)
+   
+    df_ = rbind(df_RNA, df_gene_activty)
+    df_ %>% group_by(group, time) %>% 
+      group_map(function(df_, y){
+        data.frame(Gene = gene_, time = y$time, measure = mean(df_$measure), sd = sd(df_$measure), group = y$group)
+      }) %>% do.call(rbind, .) -> df_
+    
+    df_ %>% 
+      ggplot(aes(x = time, y = measure, color = group)) + 
+      geom_line() + 
+      geom_ribbon(data = df_, aes(ymin = measure-sd, ymax = measure+sd, fill = group), alpha = 0.1, color = NA) + 
+      scale_x_continuous(breaks = seq(2, 22, 4)) + 
+      scale_y_continuous(name="RNA expression", sec.axis=sec_axis(~(.-d)/c*b+a, name="Gene activity")) + 
+      theme_classic() + 
+      xlab("ZT") + 
+      ggtitle(sprintf("%s, r=%s", gene_, r_)) -> p
+    p + geom_vline(data = df_phase, aes(xintercept = phase, color = group), linetype = 2) -> p
+  }) -> p_clock_genes_line_plot
+length(p_clock_genes_line_plot)
+patchwork::wrap_plots(p_clock_genes_line_plot, nrow = 4, guides = "collect")
+patchwork::wrap_plots(p_clock_genes_line_plot[c("Arntl", "Npas2", "Per1", "Clock", "Nr1d1")], nrow = 1, guides = "collect") -> p_clcok_gene_line_plot_1 #Fig_2F
