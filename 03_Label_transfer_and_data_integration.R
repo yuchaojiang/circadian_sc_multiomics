@@ -1018,7 +1018,7 @@ pca_motif<-prcomp(t(sc@assays[["MOTIF"]]@data))$x[,1:50]
 sc[["motif.pca"]] <- CreateDimReducObject(embeddings = pca_motif, key = "motifpca_", assay = "MOTIF")
 sc <- RunUMAP(sc, reduction = "motif.pca", dims = 1:nDims, reduction.name = "motif_umap")
 
-#Supp_Fig_3 ----
+#Supp_Fig_3 and Fig_1B ----
 DimPlot(sc, group.by = "celltype", label = TRUE, reduction = "umap.rna", repel = TRUE) + 
   ggtitle("scRNA-seq") -> p1
 DimPlot(sc, group.by = "celltype", label = TRUE, reduction = "umap.atac", repel = TRUE) + 
