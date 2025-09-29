@@ -1775,6 +1775,40 @@ Gene_Activity_Mean %>% column_to_rownames("Gene") %>% .[intersected_genes,] %>% 
 write.csv(RNA_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", row.names = F, quote = F)
 write.csv(Gene_Activity_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean.csv", row.names = F, quote = F)
 
+read.csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", header = T) -> RNA_mean
+read.csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean.csv", header = T) -> ATAC_mean
+
+list_df = 
+  list(
+    RNA = RNA_mean, 
+    ATAC = ATAC_mean
+  )
+
+list_df %>% 
+  purrr::map(function(df_){
+    df_ %>% pivot_longer(-Gene, names_to = "ZT", values_to = "Expression") %>% dplyr::mutate(ZT = gsub("ZT(\\d+)_.+", "\\1", ZT) %>% as.numeric()) -> df_
+    df_ %>% group_by(Gene, ZT) %>% summarise(Mean_Expression = mean(Expression)) %>% ungroup() %>% as.data.frame() -> df_mean
+    df_mean %>% group_by(Gene) %>% summarise(Max = max(Mean_Expression), Min = min(Mean_Expression)) %>% ungroup() %>% as.data.frame() -> df_range
+    df_range %>% dplyr::mutate(fc = Max/Min) %>% dplyr::mutate(log2_fc = log(fc, 2)) -> df_final
+  }) -> list_df_fc
+
+#Some fc show Nan or Inf ,Add pseudo count (non zero min) to and re-calculate fc and log2_fc
+list_df_fc %>% 
+  purrr::map(function(df_){
+    df_$Min %>% .[.!=0] %>% min() -> non_zero_min
+    df_[["fc"]] = (df_[["Max"]]+non_zero_min)/(df_[["Min"]]+non_zero_min)
+    df_[["log2_fc"]] = log(df_[["fc"]], 2)
+    
+    # Use lfc package to estimate pseudo count (method 2)
+#    pc <- EmpiricalBayesPrior(df_$Max, df_$Min)  # length-2: prior params (= pseudocounts + 1)
+#    psi <- PsiLFC(A = df_$Max, B = df_$Min, prior = pc)        # EB-chosen pseudocounts; median-centered Ψ-LFC
+#    fc_pc <- (df_$Max + (pc[1] - 1)) / (df_$Min + (pc[2] - 1))
+#    df_[["emprical_bayes_prior_fc"]] = fc_pc
+#    df_[["emprical_bayes_prior_log2_fc"]] = log(fc_pc,2)
+#    df_[["psi"]] = psi
+    return(df_)
+  }) -> list_df_fc
+
 
 source("~/Dropbox/singulomics/github/Calculate_HMP.R")
 
@@ -1783,23 +1817,23 @@ radian_to_phase = function(radian){
   return(phase)
 }
 
-res_RNA_Mean = cyclic_HMP(raw_data = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", minper_ = 24)
-res_RNA_Mean %>% 
-  dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
-  dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
-  recal_cauchy_p_and_hmp(.) -> res_RNA_Mean
-write.csv(res_RNA_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean_res.csv", row.names = F, quote = F, col.names = T)
+list_df %>% 
+  purrr::map(function(df_){
+    write.csv(df_, "~/Downloads/temp_mean.csv", row.names = F, quote = F, col.names = T)  
+    res_Mean = cyclic_HMP(raw_data = "~/Downloads/temp_mean.csv", minper_ = 24)
+    res_Mean %>% 
+      dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
+      dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
+      recal_cauchy_p_and_hmp(.) -> res_Mean
+  }) -> list_res_df
 
-res_Gene_Activity_Mean = cyclic_HMP(raw_data = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean.csv", minper_ = 24)
-res_Gene_Activity_Mean %>% 
-  dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
-  dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
-  recal_cauchy_p_and_hmp(.) -> res_Gene_Activity_Mean
-write.csv(res_Gene_Activity_Mean, "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean_res.csv", row.names = F, quote = F, col.names = T)
+res_list$RNA %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.6, !is.na(MetaCycle_meta2d_AMP)) %>% nrow() #5192
+res_list$ATAC %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_AMP)) %>% nrow() #4825
 
-list(`RNA expression` = res_RNA_Mean %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
-     `ATAC activity` = res_Gene_Activity_Mean %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene) %>% 
-  ggvenn::ggvenn() -> p_ggvenn #Fig_2D
+list(
+  RNA = res_list$RNA %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.6, !is.na(MetaCycle_meta2d_AMP)) %>% .$Gene,
+  ATAC = res_list$ATAC %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_AMP)) %>% .$Gene
+) %>% ggvenn::ggvenn() -> p_ggvenn #Fig_2E
 
 # Compare phase between RNA expression and ATAC activity (circacompare)
 intersect(
