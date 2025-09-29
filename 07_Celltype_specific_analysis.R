@@ -1835,6 +1835,55 @@ list(
   ATAC = res_list$ATAC %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_AMP)) %>% .$Gene
 ) %>% ggvenn::ggvenn() -> p_ggvenn #Fig_2E
 
+gene_list = list()
+c(0.05, 0.01) %>% 
+  "names<-"(., sprintf("BH_%s", .)) %>% 
+  purrr::map(function(alpha_){
+    c(seq(1.1,2,0.1), seq(1.1,2,0.1)) %>% combn(.,2) -> mat_fc
+    #    c(seq(1.1,20,0.1), seq(1.1,2,0.1)) %>% combn(.,2) -> mat_fc
+    1:ncol(mat_fc) %>% 
+      purrr::map(function(i_){
+        mat_fc[,i_][1] -> RNA_fc
+        mat_fc[,i_][2] -> ATAC_fc
+        log(RNA_fc, 2) -> RNA_log2_fc_
+        log(ATAC_fc, 2) -> ATAC_log2_fc_
+        res_list$RNA %>% dplyr::filter(log2_fc > RNA_log2_fc_) -> df_RNA
+        df_RNA %>% dplyr::filter(cauchy_BH.Q < alpha_) -> df_RNA
+        #        df_RNA %>% dplyr::filter(is.finite(fc)) -> df_RNA
+        res_list$ATAC %>% dplyr::filter(log2_fc > ATAC_log2_fc_) -> df_ATAC
+        df_ATAC %>% dplyr::filter(cauchy_BH.Q < alpha_) -> df_ATAC
+        #        df_ATAC %>% dplyr::filter(is.finite(fc)) -> df_ATAC
+        gene_list[[sprintf("BH_%s", alpha_)]][[sprintf("fc_%s_%s", RNA_fc, ATAC_fc)]][["RNA"]] <<- df_RNA$Gene
+        gene_list[[sprintf("BH_%s", alpha_)]][[sprintf("fc_%s_%s", RNA_fc, ATAC_fc)]][["ATAC"]] <<- df_ATAC$Gene
+        intersect(df_RNA$Gene, df_ATAC$Gene) %>% length() -> n_intersect
+        data.frame(BH.Q = alpha_, RNA_fc = RNA_fc, ATAC_fc = ATAC_fc, RNA_log2fc = RNA_log2_fc_, ATAC_log2fc = ATAC_log2_fc_, 
+                   RNA_n_cyclic_genes = nrow(df_RNA), ATAC_n_cyclic_genes = nrow(df_ATAC), overlapped_n_cyclic_genes = n_intersect) -> df_
+        df_ %>% dplyr::mutate(overlapped_ratio = overlapped_n_cyclic_genes/(RNA_n_cyclic_genes+ATAC_n_cyclic_genes-overlapped_n_cyclic_genes)*100) -> df_
+      }) %>% do.call(rbind, .)
+  }) %>% do.call(rbind, .) -> df_summary
+
+df_summary %>% dplyr::filter(BH.Q == 0.01) %>% dplyr::arrange(desc(overlapped_ratio))
+
+res_list %>% 
+  purrr::map2(.x=.,.y=names(.),.f=function(df_, assay_){
+    df_ %>% dplyr::filter(cauchy_BH.Q < 0.01) %>% dplyr::filter(is.finite(fc)) -> df_
+    seq(1.1,1000,0.1) %>% 
+      purrr::map(function(fc_){
+        df_ %>% dplyr::filter(fc > fc_) %>% nrow() -> n_genes_
+        data.frame(assay = assay_, fc = fc_, n_genes = n_genes_)
+      }) %>% do.call(rbind, .)
+  }) %>% do.call(rbind, .) -> df_summary_1
+
+df_summary_1 %>% 
+  ggplot(aes(x = fc, y = n_genes, group = assay, color = assay)) + 
+  geom_line() +
+  scale_x_continuous(transform = "log10", breaks = c(1.1,1.6,5,10,100,500,1000)) + 
+  scale_y_continuous(transform = "log10", breaks = c(3,5,10,100,1000,3000,5000,8000)) + 
+  ylab("Number of cyclic genes") + 
+  xlab("Fold change threshold (Amplitude)") + 
+  coord_cartesian(xlim = c(1.1,10)) +
+  theme_minimal() -> p_threshold_tuning #Fig_2D
+
 # Compare phase between RNA expression and ATAC activity (circacompare)
 intersect(
 res_RNA_Mean %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
