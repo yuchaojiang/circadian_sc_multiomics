@@ -540,6 +540,23 @@ df_ %>%
 patchwork::wrap_plots(p_2, p_1, ncol = 2)
 patchwork::wrap_plots(p_2, p_1_1, ncol = 2) #Fig_3D
 
+read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_Nonzero_Mean.csv", header = T, stringsAsFactors = F) -> res_RNA_Nonzero_Mean
+read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_gini.csv", header = T, stringsAsFactors = F) -> res_RNA_gini
+read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_cv.csv", header = T, stringsAsFactors = F) -> res_RNA_cv
+
+library(ggupset)
+list(
+  Mean = res_list$Mean %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01, !is.na(MetaCycle_meta2d_AMP), fc > 1.6) %>% .$Gene, 
+  Nonzero_Prop = res_list$Nonzero_prop %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01, !is.na(MetaCycle_meta2d_AMP), fc > 1.6) %>% .$Gene,
+  Nonzero_mean = res_RNA_Nonzero_Mean %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene,
+  cv = res_RNA_cv %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.05) %>% .$Gene,
+  gini = res_RNA_gini %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene
+) %>% 
+  ggvenn::list_to_data_frame() %>% 
+  dplyr::mutate(across(!matches("key"), function(x){x %>% as.integer()})) %>% 
+  as.data.frame() %>% 
+  UpSetR::upset(sets = c("Mean", "cv", "Nonzero_Prop", "gini", "Nonzero_mean"), keep.order = T, order.by = "freq") -> p_upset #Fig_S16A
+
 # 12. Plot correlation between pval, phase, and amp between RNA mean and RNA non zero proportion ----
 read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_Mean.csv", header = T, stringsAsFactors = F) -> res_RNA_Mean
 read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_NonZeroProp.csv", header = T, stringsAsFactors = F) -> res_RNA_NonZeroProp
@@ -852,41 +869,6 @@ p
 ggsave(filename='bursting/bursting_mean.pdf', width=13, height=3.5, plot=p)
 ####
 
-# 15. Upset plot of Nonzero_mean, gini, Nonzero_Prop, cv, and mean ----
-read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_Mean.csv", header = T, stringsAsFactors = F) -> res_RNA_Mean
-read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_NonZeroProp.csv", header = T, stringsAsFactors = F) -> res_RNA_NonZeroProp
-read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_Nonzero_Mean.csv", header = T, stringsAsFactors = F) -> res_RNA_Nonzero_Mean
-read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_gini.csv", header = T, stringsAsFactors = F) -> res_RNA_gini
-read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_cv.csv", header = T, stringsAsFactors = F) -> res_RNA_cv
-list(Mean = res_RNA_Mean, 
-     Nonzero_Prop = res_RNA_NonZeroProp,
-     Nonzero_mean = res_RNA_Nonzero_Mean
-) %>% 
-  map2(.x=.,.y=names(.),.f=function(x,y){
-    type_ = y
-    if (type_ == "Mean"){
-      x %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene -> genes
-    }else if (type_ == "Nonzero_Prop") {
-      x %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene -> genes
-    }else{
-      x %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene -> genes 
-    }
-  }) -> genes_list
-ggvenn::ggvenn(genes_list) -> p_venn
-
-library(ggupset)
-list(
-  Mean = res_RNA_Mean %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene, 
-  Nonzero_Prop = res_RNA_NonZeroProp %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene,
-  Nonzero_mean = res_RNA_Nonzero_Mean %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene,
-  cv = res_RNA_cv %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.05) %>% .$Gene,
-  gini = res_RNA_gini %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene
-) %>% 
-  ggvenn::list_to_data_frame() %>% 
-  dplyr::mutate(across(!matches("key"), function(x){x %>% as.integer()})) %>% 
-  as.data.frame() %>% 
-  UpSetR::upset(sets = c("Mean", "cv", "Nonzero_Prop", "gini", "Nonzero_mean"), keep.order = T, order.by = "freq") -> p_upset #Supp_Fig_14B
-
 # 16. Pair-wise correlation (Nonzero_mean, gini, Nonzero_Prop, cv, and mean) ----
 setwd("~/Dropbox/Research/singulomics/")
 
@@ -1070,7 +1052,7 @@ cyc.genes=cyc.genes2
 rm(cyc.genes2)
 
 pdf(file='bursting/pairwise.pdf', width=8, height=8)
-pairs(toplot, lower.panel = function(x,y){smoothScatter(x,y,add=TRUE)}, upper.panel = panel.cor, main='Pairwise Spearman correlation')
+pairs(toplot, lower.panel = function(x,y){smoothScatter(x,y,add=TRUE)}, upper.panel = panel.cor, main='Pairwise Spearman correlation') #Fig_S16B
 dev.off()
 
 ####

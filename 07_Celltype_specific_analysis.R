@@ -1628,6 +1628,7 @@ pheatmap(TF.cor)
 
 rm(sc)
 save.image(file='github_rda/tf_networks.rda')
+####
 
 library(Seurat)
 library(Signac)
@@ -1651,9 +1652,9 @@ library(HarmonicRegression)
 library(pheatmap)
 library(harmonicmeanp)
 
-load('github_rda/tf_networks.rda')
+load('~/Dropbox/singulomics/github_rda/tf_networks.rda')
 
-source("github/Calculate_HMP.R")
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
 
 Calculate_cyclic_pval = function(dat_){
   dat_ %>% 
@@ -1691,22 +1692,99 @@ res_TF.exp$Gene = toupper(res_TF.exp$Gene)
 Calculate_cyclic_pval(TF.activity.ag) -> res_TF.activity
 res_TF.activity$Gene = toupper(res_TF.activity$Gene)
 
+TF.exp.ag %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Gene") %>% 
+  pivot_longer(-Gene, names_to = "ZT", values_to = "expr") %>% 
+  dplyr::mutate(ZT = gsub(".+ZT(\\d+)", "\\1", ZT) %>% as.numeric()) %>% 
+  group_by(Gene, ZT) %>% 
+  summarise(expr = mean(expr)) %>% 
+  ungroup() %>% 
+  group_by(Gene) %>% 
+  summarise(Mean = mean(expr), Max = max(expr), Min = min(expr)) %>% 
+  ungroup() %>% 
+  {
+    df_ = .
+    Nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_[["fc"]] = (df_$Max+Nonzero_min)/(df_$Min+Nonzero_min)
+    df_[["log2_fc"]] = log(df_$fc, 2)
+    df_
+  } -> TF.exp.ag.fc
+TF.exp.ag.fc$Gene %>% toupper() -> TF.exp.ag.fc$Gene
+
+TF.activity.ag %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Gene") %>% 
+  pivot_longer(-Gene, names_to = "ZT", values_to = "expr") %>% 
+  dplyr::mutate(ZT = gsub(".+ZT(\\d+)", "\\1", ZT) %>% as.numeric()) %>% 
+  group_by(Gene, ZT) %>% 
+  summarise(expr = mean(expr)) %>% 
+  ungroup() %>% 
+  group_by(Gene) %>% 
+  summarise(Mean = mean(expr), Max = max(expr), Min = min(expr)) %>% 
+  ungroup() %>% 
+  {
+    df_ = .
+    Nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_[["fc"]] = (df_$Max+Nonzero_min)/(df_$Min+Nonzero_min)
+    df_[["log2_fc"]] = log(df_$fc, 2)
+    df_
+  } -> TF.activity.ag.fc
+TF.activity.ag.fc$Gene %>% toupper() -> TF.activity.ag.fc$Gene
+
+TF.motif.ag %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  apply(., 1, function(x){scales::rescale(x, to = c(0,1))}) %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Gene") %>% 
+  pivot_longer(-Gene, names_to = "ZT", values_to = "expr") %>% 
+  dplyr::mutate(ZT = gsub(".+ZT(\\d+)", "\\1", ZT) %>% as.numeric()) %>% 
+  group_by(Gene, ZT) %>% 
+  summarise(expr = mean(expr)) %>% 
+  ungroup() %>% 
+  group_by(Gene) %>% 
+  summarise(Mean = mean(expr), Max = max(expr), Min = min(expr)) %>% 
+  ungroup() %>% 
+  {
+    df_ = .
+    Nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_[["fc"]] = (df_$Max+Nonzero_min)/(df_$Min+Nonzero_min)
+    df_[["log2_fc"]] = log(df_$fc, 2)
+    df_
+  } -> TF.motif.ag.fc
+TF.motif.ag.fc$Gene %>% toupper() -> TF.motif.ag.fc$Gene  
+
+left_join(x = res_TF.exp, y = TF.exp.ag.fc, by = "Gene") -> res_TF.exp
+left_join(x = res_TF.activity, y = TF.activity.ag.fc, by = "Gene") -> res_TF.activity
+left_join(x = res_TF.motif, y = TF.motif.ag.fc, by = "Gene") -> res_TF.motif
+
+res_TF.exp$fc %>% summary()
+res_TF.activity$fc %>% summary()
+res_TF.motif$fc %>% summary()
+
+res_TF.exp %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.6, !is.na(MetaCycle_meta2d_rAMP)) %>% dim()
+res_TF.activity %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_rAMP)) %>% dim()
+res_TF.motif %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_rAMP)) %>% dim()
+
 list(
-  TF.motif = res_TF.motif,
-  TF.exp = res_TF.exp,
-  TF.activity = res_TF.activity
+TF.motif = res_TF.motif %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_rAMP)) %>% .$Gene,
+TF.exp = res_TF.exp %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.6, !is.na(MetaCycle_meta2d_rAMP)) %>% .$Gene,
+TF.activity = res_TF.activity %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_rAMP)) %>% .$Gene
 ) %>% 
-  map(function(df_){
-    df_ %>% dplyr::filter(cauchy_BH.Q < 0.05) -> df_
-    #    df_ %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.05) -> df_
-    dim(df_)
-    df_$Gene -> Gene_
-  }) %>% {
-    list_ = .
-    list_ ->> venn_list_
-    ggvenn::ggvenn(list_) -> p    
-    p
-  } -> p_venn #Supp Fig 12A
+  ggvenn::ggvenn() -> p_ggvenn #Fig_S14A
+
+clock_TF = c("ARNTL", "BHLHE40", "BHLHE41", "CLOCK", "NPAS2", "DBP", "NFIL3", "NR1D1", "RORC")
+list(
+  TF.motif = res_TF.motif %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_rAMP)) %>% .$Gene,
+  TF.exp = res_TF.exp %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.6, !is.na(MetaCycle_meta2d_rAMP)) %>% .$Gene,
+  TF.activity = res_TF.activity %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_rAMP)) %>% .$Gene
+) %>% purrr::reduce(., intersect) -> overlapped_genes
+clock_TF %in% overlapped_genes
+clock_TF
 
 make_output_mat = function(df_){
   df_ %>% as.data.frame() %>% rownames_to_column("ZT") %>% pivot_longer(-ZT, names_to = "Gene") %>% 
@@ -1733,7 +1811,7 @@ make_output_mat_1 = function(res_df, dat_df){
     phase = (radian/(2*pi))*24
     return(phase)
   }
-  res_df %>% dplyr::mutate(Phase = radian_to_phase(HR_phi), Gene = toupper(Gene)) %>% dplyr::select(Gene, cauchy_p, cauchy_BH.Q, Phase, MetaCycle_meta2d_AMP, MetaCycle_meta2d_Base, MetaCycle_meta2d_rAMP) -> res_df
+  res_df %>% dplyr::mutate(Phase = radian_to_phase(HR_phi), Gene = toupper(Gene)) %>% dplyr::select(Gene, cauchy_p, cauchy_BH.Q, Phase, MetaCycle_meta2d_AMP, MetaCycle_meta2d_Base, MetaCycle_meta2d_rAMP, fc) -> res_df
   dat_df$Gene = toupper(dat_df$Gene)
   left_join(x = res_df, y = dat_df, by = "Gene") %>% dplyr::arrange(cauchy_BH.Q) -> df_final
   return(df_final)
@@ -1755,7 +1833,7 @@ writeData(wb, sheet = "TF_ATAC_activity", x = output_TF.activity)
 addWorksheet(wb, "TF_motif_score")
 writeData(wb, sheet = "TF_motif_score", x = output_TF.motif)
 
-saveWorkbook(wb, "~/Downloads/00_Supp_Table_4_1.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/Downloads/00_Supp_Table_2.xlsx", overwrite = TRUE) #Table_S2
 
 # 10. Hepatocytes rhythmicity (RNA expression and ATAC activity) ----
 library(Seurat)
