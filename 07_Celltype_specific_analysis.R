@@ -2468,3 +2468,137 @@ df_ %>%
 p_RNA_1$data %>% 
   group_by(Method) %>% 
   summarise(Mean_type_1_error = mean(type_1_error))
+
+#Compare nCount_RNA and nFeature_RNA in different celltypes ----
+library(Seurat)
+library(Signac)
+library(tidyverse)
+readRDS("~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds") -> sc
+sc=sc[,!grepl('KO',sc$group)]
+
+sc@meta.data -> sc_meta
+rm(sc)
+gc()
+
+list.files(path = "~/Dropbox/singulomics/github_rda", pattern = "cellnames\\.rds", full.names = T) %>% 
+  "names<-"(., gsub("/.+/(.+)_cellnames\\.rds", "\\1", .)) %>% 
+  .[c("Hepatocytes", "Endothelial_cells", "Fibroblasts", "Kupffer_cells")] %>% 
+  map(function(x){
+    readRDS(x) -> cellnames
+  }) %>% purrr::reduce(., c) %>% 
+  {sc_meta[., ]} %>% 
+  {table(.$ZT, .$celltype)} %>% 
+  apply(1, min) -> ZT_min
+
+ZT_min %>% as.data.frame() %>% 
+  "colnames<-"(., "Number of cells") %>% 
+  rownames_to_column("Time points") %>% 
+  dplyr::mutate(`Time points` = factor(`Time points`, levels = `Time points`)) %>% 
+  ggplot(aes(x = `Time points`, y = `Number of cells`, group = `Time points`, fill = `Time points`)) + 
+  geom_col() +
+  theme_classic()
+
+table(sc_meta$celltype, sc_meta$ZT) %>% as.matrix() %>% 
+  .[c("Hepatocytes", "Endothelial cells", "Fibroblasts", "Kupffer cells"), ] %>% 
+  apply(., 2, min)
+
+readRDS("~/Dropbox/singulomics/github_rda/output/Celltype_specific/list_cell_names.rds") -> list_cell_names
+
+list_cell_names$seed_10 %>% 
+  names() %>% 
+  "names<-"(.,.) %>% 
+  purrr::map(function(celltype_){
+    list_cell_names %>% 
+      purrr::map2(.x=.,.y=names(.),.f=function(list_, seed_){
+        list_[[celltype_]] %>% 
+          purrr::map2(.x=.,.y=names(.),.f=function(cell_, timepoint_){
+            cell_
+          }) %>% purrr::reduce(., c) %>% unique()
+      }) %>% purrr::reduce(., c) %>% unique() -> cells_
+    sc_meta[cells_, ] -> df_
+    df_ %>% dplyr::select(nCount_RNA, nFeature_RNA, nCount_ATAC, nFeature_ATAC) -> df_
+    df_ %>% dplyr::mutate(celltype = celltype_, .before = 1) -> df_
+  }) %>% do.call(rbind, .) -> df_
+
+rownames(df_) %>% gsub(".+\\.(.+)", "\\1", .) %>% sc_meta[., ] %>% 
+  .$ZT -> timepoints_
+table(timepoints_)
+any(is.na(timepoints_))
+df_ %>% dplyr::mutate(ZT = timepoints_) -> df_
+
+save.image(file = "~/Downloads/PNAS_revision/rda/snRNA_cell_type_specific.rda")
+
+rm(list=ls())
+library(tidyverse)
+
+load("~/Downloads/PNAS_revision/rda/snRNA_cell_type_specific.rda")
+
+colnames(df_)[-c(1,6)] %>% 
+  "names<-"(.,.) %>% 
+  #  .[1] %>% 
+  purrr::map(function(x){
+    df_[,c("celltype", x, "ZT")] -> df_
+    df_ %>% 
+      #      ggplot(aes(x = celltype, y = .data[[x]], group = ZT, fill = ZT, color = ZT)) + 
+      ggplot(aes(x = celltype, y = .data[[x]], fill = ZT)) + 
+      geom_boxplot(outlier.shape = NA) +
+      #      geom_violin() #+ 
+      theme_classic() + 
+      ggtitle(x)
+  }) -> p_list
+
+ZT_min %>% as.data.frame() %>% 
+  "colnames<-"(., "Number of cells") %>% 
+  rownames_to_column("Time points") %>% 
+  dplyr::mutate(`Time points` = factor(`Time points`, levels = `Time points`)) %>% 
+  ggplot(aes(x = `Time points`, y = `Number of cells`, group = `Time points`, fill = `Time points`)) + 
+  geom_col() +
+  theme_classic() -> p_1
+
+p_list$nCount_RNA + coord_cartesian(ylim = c(0,20000)) -> p_2
+p_list$nFeature_RNA + coord_cartesian(ylim = c(0,5000)) -> p_3
+
+p_2$data %>% 
+  ggplot(aes(x = celltype, y = nCount_RNA, group = celltype, fill = celltype)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  coord_cartesian(ylim = c(0,26000)) + 
+  theme_classic() -> p2_1
+
+p_3$data %>% 
+  ggplot(aes(x = celltype, y = nFeature_RNA, group = celltype, fill = celltype)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  coord_cartesian(ylim = c(0,7000)) + 
+  theme_classic() -> p3_1
+
+patchwork::wrap_plots(p2_1, p3_1, ncol = 2, guides = "collect") -> p #Fig_S11A
+
+rm(df_, list_cell_names, p_list, sc_meta, timepoints_, ZT_min)
+
+load("~/Dropbox/singulomics/github_rda/lca_nuc_integrated.rda")
+
+unique(lca_nuc_integrated$annot) %>% 
+  .[c(3,1,2,6)] %>% 
+  "names<-"(.,.) %>% 
+  purrr::map(function(celltype_){
+    lca_nuc_integrated@meta.data %>% dplyr::filter(annot == celltype_) %>% 
+      dplyr::select(nCount_RNA, nFeature_RNA) -> df_
+    df_ %>% dplyr::mutate(celltype = celltype_) -> df_
+  }) %>% do.call(rbind, .) -> df_
+
+colnames(df_)[-3] %>% 
+  "names<-"(.,.) %>% 
+  #  .[1] %>% 
+  purrr::map(function(x){
+    df_[,c("celltype", x)] -> df_
+    df_ %>% 
+      #      ggplot(aes(x = celltype, y = .data[[x]], group = ZT, fill = ZT, color = ZT)) + 
+      ggplot(aes(x = celltype, y = .data[[x]], fill = celltype)) + 
+      geom_boxplot(outlier.shape = NA) +
+      #      geom_violin() #+ 
+      theme_classic() + 
+      ggtitle(x)
+  }) -> p_list
+
+p_list$nCount_RNA + coord_cartesian(ylim = c(0,15000)) -> p_4 #Fig_S11B
+p_list$nFeature_RNA + coord_cartesian(ylim = c(0,4500)) -> p_5 #Fig_S11B
+###
