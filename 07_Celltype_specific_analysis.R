@@ -1488,13 +1488,11 @@ enriched.TF.motifs.mm10 %>%
     list(class = class_, family = family_)
   })
 
-enriched.TF.motifs.mm10$`ZT0-3` %>% dplyr::filter(grepl("KLF",motif.name)) %>% .$motif %>% .[c(1,8)] %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p1
-enriched.TF.motifs.mm10$`ZT0-3`[c(6,5), ]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p1
-enriched.TF.motifs.mm10$`ZT6-9`[c(11,12),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p2
-enriched.TF.motifs.mm10$`ZT9-12`[c(1,5),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p3
-enriched.TF.motifs.mm10$`ZT15-18`[c(5,11),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p4
-enriched.TF.motifs.mm10$`ZT15-18`[c(3,5),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p4
-enriched.TF.motifs.mm10$`ZT21-24`[c(1,4),]$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p5
+enriched.TF.motifs.mm10$`ZT0-3` %>% dplyr::filter(motif.name %in% c("KLF10", "KLF15")) %>% .$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p1
+enriched.TF.motifs.mm10$`ZT6-9` %>% dplyr::filter(motif.name %in% c("ARNTL", "CLOCK")) %>% .$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p2
+enriched.TF.motifs.mm10$`ZT9-12` %>% dplyr::filter(motif.name %in% c("DBP", "NFIL3")) %>% .$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p3
+enriched.TF.motifs.mm10$`ZT15-18` %>% dplyr::filter(motif.name %in% c("RXRA", "PPARD")) %>% .$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p4
+enriched.TF.motifs.mm10$`ZT18-21` %>% dplyr::filter(motif.name %in% c("RORC", "NR1D1")) %>% .$motif %>% MotifPlot(object = sc, motifs = ., ncol = 1) -> p5
 patchwork::wrap_plots(p1, p2, p3, p4, p5, nrow = 1) #Fig_2G
 
 ####
