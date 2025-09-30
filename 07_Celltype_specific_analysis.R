@@ -2174,3 +2174,83 @@ clock_genes[clock_genes %in% unique(circacompare_res$Gene)] %>%
 length(p_clock_genes_line_plot)
 patchwork::wrap_plots(p_clock_genes_line_plot, nrow = 4, guides = "collect")
 patchwork::wrap_plots(p_clock_genes_line_plot[c("Arntl", "Npas2", "Per1", "Clock", "Nr1d1")], nrow = 1, guides = "collect") -> p_clcok_gene_line_plot_1 #Fig_2F
+
+#Correlation between JTKcycle p-values and HR p-values ----
+rm(list=ls())
+library(tidyverse)
+read.csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean_res.csv", header = T) -> df_
+
+df_ %>% 
+  dplyr::mutate(significance = case_when(
+    cauchy_BH.Q < 0.01 ~ "significant",
+    TRUE ~ "not significant"
+  )) %>% 
+  dplyr::mutate(significance = factor(significance, levels = c("significant", "not significant"))) %>% 
+  dplyr::select(Gene, cauchy_p, MetaCycle_JTK_pvalue, HR_p.value, significance) %>% 
+  column_to_rownames("Gene") %>% 
+  dplyr::mutate(across(.cols = 1:3, function(x){-log(x,10)})) %>%
+  "colnames<-"(., c("-log10(JTK Cycle + HR cauchy p-value)", "-log10(JTK Cycle p-value)", "-log10(HR p-value)", "significance")) %>% 
+  GGally::ggpairs(., columns = 1:3, aes(color = significance, alpha = 0.5)) -> p_snRNA_pval_cor
+
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+
+radian_to_phase = function(radian){
+  phase = (radian/(2*pi))*24
+  return(phase)
+}
+
+read_table("~/Downloads/PNAS_revision/Raw_data/GSE70499_FINAL_master_list_of_genes_counts_MIN.sense.George_WT_v_KO_timecourse.txt", col_names = T) -> df_
+df_ %>% dplyr::select(!matches("KO_|geneCoordinate|geneSymbol")) -> df_
+colnames(df_)
+c("ZT0_REP1", "ZT0_REP2", "ZT0_REP3", "ZT4_REP1", "ZT4_REP2", "ZT4_REP3", 
+  "ZT8_REP1", "ZT8_REP2", "ZT8_REP3", "ZT12_REP1", "ZT12_REP2", "ZT12_REP3",
+  "ZT16_REP1", "ZT16_REP2", "ZT16_REP3", "ZT20_REP1", "ZT20_REP2", "ZT20_REP3") -> colnames_
+c("Gene", colnames_) -> colnames(df_)
+
+df_[,-1] %>% colSums() %>% median() -> median_
+df_ %>% column_to_rownames("Gene") %>% 
+  dplyr::mutate(across(everything(), function(x){(x/sum(x))*median_})) %>% 
+  rownames_to_column("Gene") -> df_
+
+1:3 %>% 
+  "names<-"(., sprintf("%s_meatacell", .)) %>% 
+  purrr::map(function(n_metacell){
+    combn(1:3, n_metacell) -> mat_
+    list_names_ = c()
+    1:ncol(mat_) %>% 
+      purrr::map(function(i){
+        mat_[,i] -> metacell_
+        paste(metacell_, collapse = "_") %>% sprintf("metacell_%s", .) -> list_name_
+        list_names_ <<- c(list_names_, list_name_)
+        metacell_ %>% sprintf("_REP%s$", .) -> metacell_
+        metacell_ %>% paste(., collapse = "|") -> metacell_
+        sprintf("Gene$|%s", metacell_) -> metacell_
+        grepl(metacell_, colnames(df_)) -> se
+        df_[, se] -> df_
+        write.csv(df_, "~/Downloads/temp_mean.csv", row.names = F, quote = F, col.names = T)
+        res_Mean = cyclic_HMP(raw_data = "~/Downloads/temp_mean.csv", minper_ = 24)
+        res_Mean %>% 
+          dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
+          dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
+          recal_cauchy_p_and_hmp(.) -> res_Mean
+      }) -> list_
+    names(list_) <- list_names_
+    return(list_)
+  }) -> res_list
+save(res_list, file = "~/Downloads/GSE70499_res_list.rda")
+
+load(file = "~/Downloads/GSE70499_res_list.rda")
+res_list$`3_meatacell`$metacell_1_2_3 %>% 
+  #df_ %>% 
+  dplyr::mutate(significance = case_when(
+    cauchy_BH.Q < 0.01 ~ "significant",
+    TRUE ~ "not significant"
+  )) %>% 
+  dplyr::mutate(significance = factor(significance, levels = c("significant", "not significant"))) %>% 
+  dplyr::select(Gene, cauchy_p, MetaCycle_JTK_pvalue, HR_p.value, significance) %>% 
+  column_to_rownames("Gene") %>% 
+  dplyr::mutate(across(.cols = 1:3, function(x){-log(x,10)})) %>%
+  "colnames<-"(., c("-log10(JTK Cycle + HR cauchy p-value)", "-log10(JTK Cycle p-value)", "-log10(HR p-value)", "significance")) %>% 
+  GGally::ggpairs(., columns = 1:3, aes(color = significance, alpha = 0.5)) -> p_GSE70499_pval_cor
+
+rm(list=ls())

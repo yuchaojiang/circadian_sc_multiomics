@@ -43,7 +43,7 @@ cyclic_HMP = function(raw_data=NULL, exp_matrix=NULL, gene=NULL, timepoints=NULL
   print(timepoints)
   
   JTK.i=meta2d(infile = raw_data, filestyle = "csv",
-               outputFile = FALSE, timepoints = timepoints, cycMethod = c("JTK", "LS"),
+               outputFile = FALSE, timepoints = timepoints, cycMethod = c("JTK"),
                maxper = 24, minper = minper_, combinePvalue = 'bonferroni', parallelize = T, nCores = nCores_)$meta
   
   #Run RAIN
