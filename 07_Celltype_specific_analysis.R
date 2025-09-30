@@ -2254,3 +2254,217 @@ res_list$`3_meatacell`$metacell_1_2_3 %>%
   GGally::ggpairs(., columns = 1:3, aes(color = significance, alpha = 0.5)) -> p_GSE70499_pval_cor
 
 rm(list=ls())
+
+#Permutation analysis ----
+
+library(tidyverse)
+
+read_csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean.csv", col_names = T) -> df_ATAC_mean
+read_csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", col_names = T) -> df_RNA_mean
+colnames(df_RNA_mean)
+colnames(df_ATAC_mean)
+
+#colnames(df_RNA_mean)[-1] -> timepoints_
+#permute_timepoints = sample(timepoints_, replace = F)
+#colnames(df_RNA_mean)[-1] <- permute_timepoints
+#head(df_RNA_mean)
+
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+radian_to_phase = function(radian){
+  phase = (radian/(2*pi))*24
+  return(phase)
+}
+
+1:100 %>% 
+  "names<-"(., sprintf("seed_%s", .)) %>% 
+  purrr::map(function(seed_){
+    print(seed_)
+    set.seed(seed_)
+    df_ = df_RNA_mean
+    colnames(df_)[-1] -> timepoints_
+    permute_timepoints = sample(timepoints_, replace = F)
+    colnames(df_)[-1] <- permute_timepoints
+    write.csv(df_, "~/Downloads/temp_mean.csv", row.names = F, quote = F, col.names = T)
+    
+    res_Mean = cyclic_HMP(raw_data = "~/Downloads/temp_mean.csv", minper_ = 24)
+    res_Mean %>% 
+      dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
+      dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
+      recal_cauchy_p_and_hmp(.) -> res_Mean
+  }) -> permuted_res_list_RNA
+save(permuted_res_list_RNA, file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Permuted_RNA_Mean.RData" )
+
+1:100 %>% 
+  "names<-"(., sprintf("seed_%s", .)) %>% 
+  purrr::map(function(seed_){
+    print(seed_)
+    set.seed(seed_)
+    df_ = df_ATAC_mean
+    colnames(df_)[-1] -> timepoints_
+    permute_timepoints = sample(timepoints_, replace = F)
+    colnames(df_)[-1] <- permute_timepoints
+    write.csv(df_, "~/Downloads/temp_mean.csv", row.names = F, quote = F, col.names = T)
+    
+    res_Mean = cyclic_HMP(raw_data = "~/Downloads/temp_mean.csv", minper_ = 24)
+    res_Mean %>% 
+      dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
+      dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
+      recal_cauchy_p_and_hmp(.) -> res_Mean
+  }) -> permuted_res_list_ATAC
+save(permuted_res_list_ATAC, file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Permuted_ATAC_Mean.RData")
+
+# Permutation Type-1 error ----
+load("~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Permuted_RNA_Mean.RData")
+load("~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Permuted_ATAC_Mean.RData")
+read_csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean_res.csv", col_names = T) -> df_RNA_mean_res
+read_csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean_res.csv", col_names = T) -> df_ATAC_mean_res
+
+obs_pval_list = list(RNA = df_RNA_mean_res, 
+                     ATAC = df_ATAC_mean_res)
+
+c("cauchy_p", "MetaCycle_JTK_pvalue", "HR_p.value", "cauchy_BH.Q", "MetaCycle_JTK_BH.Q", "HR_q.value") %>% 
+  "names<-"(.,.) %>% 
+  #  .[1] %>% 
+  purrr::map(function(method_){
+    i = 0
+    permuted_res_list_RNA %>% 
+      purrr::map(function(df_){
+        i <<- i+1
+        run_ = sprintf("run_%s", i)
+        df_[[method_]] %>% {x = .; x[is.na(x)] <- 1; x} -> p
+        names(p) = df_$Gene
+        p %>% as.data.frame() %>% rownames_to_column("Gene") %>% 
+          "colnames<-"(., c("Gene", "observed")) %>% 
+          dplyr::arrange(observed) -> df_
+        #        if (grepl("JTK", method_)){
+        #          df_ %>% dplyr::filter(observed != 1) -> df_
+        ##          df_ %>% dplyr::filter(observed < 0.9998) -> df_
+        #        }else if (grepl("cauchy", method_)){
+        ##          df_ %>% dplyr::filter(observed != 1) -> df_
+        ##          df_ %>% dplyr::filter(observed < 0.9998) -> df_
+        #          df_ %>% dplyr::filter(observed < 0.99979) -> df_
+        #        }else{
+        #          df_ = df_
+        #        }
+        df_ %>% dplyr::mutate(expected = (seq_len(nrow(df_))-0.5)/nrow(df_)) -> df_
+        df_ %>% dplyr::mutate(run = run_) -> df_
+        df_
+      }) %>% do.call(rbind, .)
+  }) -> df_list_1
+
+df_list_1 %>% 
+  purrr::map(function(df_){
+    seq(0,1,0.01) -> intervals_
+    1:(length(intervals_)-1) %>% 
+      purrr::map(function(i_){
+        upper_threshold = intervals_[i_+1]
+        lower_threshold = intervals_[i_]
+        df_ %>% dplyr::filter(expected > lower_threshold, expected <= upper_threshold) -> df_
+        data.frame(expected = mean(df_$expected), median = median(df_$observed),
+                   lower = quantile(df_$observed, 0.025), upper = quantile(df_$observed, 0.975))
+      }) %>% do.call(rbind, .)
+  }) -> df_summary_list
+
+ggplot(df_summary_list$HR_p.value, aes(x = expected)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "grey") +
+  geom_line(aes(y = median), color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(
+    title = "QQ plot across 100 permutations\n(HR)",
+    x = "Expected Uniform Quantiles",
+    y = "Permuted p-values"
+  ) +
+  theme_minimal() -> p_HR
+
+#p_HR$data %>% 
+df_list_1$HR_p.value %>% 
+  #  ggplot(aes(x = median)) +
+  ggplot(aes(x = observed)) + 
+  geom_histogram(bins = 10) + 
+  #  geom_histogram(bins = 10) +
+  ylab("Number of genes") + 
+  xlab("Nominal p-value") + 
+  ggtitle("HR") + 
+  theme_minimal() -> p_HR_1
+
+df_summary_list$MetaCycle_JTK_pvalue %>% 
+  ggplot(aes(x = expected)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "grey") +
+  geom_line(aes(y = median), color = "blue") +
+  #  geom_smooth(aes(y = median), color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(
+    title = "QQ plot across 100 permutations\n(JTK Cycle)",
+    x = "Expected Uniform Quantiles",
+    y = "Permuted p-values"
+  ) +
+  theme_minimal() -> p_JTK
+
+#p_JTK$data %>% 
+df_list_1$MetaCycle_JTK_pvalue %>% 
+  #  ggplot(aes(x = median)) +
+  ggplot(aes(x = observed)) + 
+  #  geom_histogram(bins = 50) + 
+  geom_histogram(bins = 10) + 
+  ylab("Number of genes") + 
+  xlab("Nominal p-value") + 
+  ggtitle("JTK Cycle") + 
+  theme_minimal() -> p_JTK_1
+
+df_summary_list$cauchy_p %>% 
+  ggplot(aes(x = expected)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, fill = "grey") +
+  geom_line(aes(y = median), color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  labs(
+    title = "QQ plot across 100 permutations\n(JTK Cycle + HR)",
+    x = "Expected Uniform Quantiles",
+    y = "Permuted p-values"
+  ) +
+  theme_minimal() -> p_cauchy
+
+#p_cauchy$data %>% 
+df_list_1$cauchy_p %>% 
+  #  ggplot(aes(x = median)) + 
+  ggplot(aes(x = observed)) + 
+  #  geom_histogram(bins = 50) + 
+  geom_histogram(bins = 10) + 
+  ylab("Number of genes") + 
+  xlab("Nominal p-value") + 
+  ggtitle("JTK Cycle + HR") + 
+  theme_minimal() -> p_cauchy_1
+
+patchwork::wrap_plots(p_HR, p_JTK, p_cauchy, ncol = 3)
+patchwork::wrap_plots(p_HR_1, p_JTK_1, p_cauchy_1, ncol = 3) -> p #Fig_S9C
+
+c("cauchy_BH.Q", "cauchy_p", "MetaCycle_JTK_BH.Q", "MetaCycle_JTK_pvalue", "HR_q.value", "HR_p.value") %>% 
+  .[c(1,3,5)] %>% 
+  purrr::map(function(values_){
+    permuted_res_list_RNA %>% 
+      #      .[1] %>% 
+      purrr::map2(.x=.,.y=names(.),.f=function(df_, seed_){
+        #        df_ = drop_na(df_)
+        se = df_[[values_]] < 0.01
+        se[is.na(se)] <- FALSE
+        print(any(is.na(se)))
+        df_[se, ] -> df_1
+        (nrow(df_1)/nrow(df_))*100 -> type_1_error
+        data.frame(Method = values_, type_1_error = type_1_error, seed = seed_)
+      }) %>% do.call(rbind, .)
+  }) %>% do.call(rbind, .) -> df_
+df_ %>% dplyr::mutate(Method = case_when(
+  Method == "cauchy_BH.Q" ~ "JTK Cycle + HR",
+  Method == "MetaCycle_JTK_BH.Q" ~ "JTK Cycle",
+  Method == "HR_q.value" ~ "HR"
+)) -> df_
+df_ %>% 
+  ggplot(aes(x = Method, y = type_1_error, group = Method, color = Method, fill = Method)) + 
+  geom_point() + 
+  geom_violin(alpha = 0.5) + 
+  theme_classic() + 
+  ylab("Type 1 Error Rate (%)") + 
+  ggtitle("100 times permutation (snRNA)") -> p_RNA_1
+
+p_RNA_1$data %>% 
+  group_by(Method) %>% 
+  summarise(Mean_type_1_error = mean(type_1_error))
