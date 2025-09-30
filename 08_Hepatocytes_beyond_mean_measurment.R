@@ -391,18 +391,59 @@ wrap_plots(p_list, ncol = 3) -> p #Fig_3B
 ####
 
 # 10. Plot venndiagram (RNA Mean vs RNA Non zero prop) ----
-read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_Mean.csv", header = T, stringsAsFactors = F) -> res_RNA_Mean
-read.csv("~/Dropbox/singulomics/github_rda/output/Beyond_Mean/res_RNA_NonZeroProp.csv", header = T, stringsAsFactors = F) -> res_RNA_NonZeroProp
-list(Mean = res_RNA_Mean, Nonzero_Prop = res_RNA_NonZeroProp) %>% 
-  map2(.x=.,.y=names(.),.f=function(x,y){
-    type_ = y
-    if (type_ == "Mean"){
-      x %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene -> genes
-    }else{
-      x %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01) %>% .$Gene -> genes
-    }
-  }) -> genes_list
-ggvenn::ggvenn(genes_list) -> p_venn #Fig_3C
+read.csv(file = "~/Dropbox/singulomics/github_rda/output/Beyond_Mean/RNA_Mean.csv", header = T) -> RNA_mean
+read.csv(file = "~/Dropbox/singulomics/github_rda/output/Beyond_Mean/RNA_NonZeroProp.csv", header = T) -> Nonzero_prop_mean
+
+source("~/Dropbox/singulomics/github/Calculate_HMP.R")
+radian_to_phase = function(radian){
+  phase = (radian/(2*pi))*24
+  return(phase)
+}
+
+list_df = 
+  list(
+    Mean = RNA_mean, 
+    Nonzero_prop = Nonzero_prop_mean
+  )
+
+list_df %>% 
+  purrr::map(function(df_){
+    df_ %>% pivot_longer(-Gene, names_to = "ZT", values_to = "Expression") %>% dplyr::mutate(ZT = gsub("ZT(\\d+)_.+", "\\1", ZT) %>% as.numeric()) -> df_
+    df_ %>% group_by(Gene, ZT) %>% summarise(Mean_Expression = mean(Expression)) %>% ungroup() %>% as.data.frame() -> df_mean
+    df_mean %>% group_by(Gene) %>% summarise(Max = max(Mean_Expression), Min = min(Mean_Expression)) %>% ungroup() %>% as.data.frame() -> df_range
+    df_range %>% dplyr::mutate(fc = Max/Min) %>% dplyr::mutate(log2_fc = log(fc, 2)) -> df_final
+  }) -> list_df_fc
+
+#Some fc show Nan or Inf ,Add pseudo count (non zero min) to and re-calculate fc and log2_fc
+list_df_fc %>% 
+  purrr::map(function(df_){
+    df_$Min %>% .[.!=0] %>% min() -> non_zero_min
+    df_[["fc"]] = (df_[["Max"]]+non_zero_min)/(df_[["Min"]]+non_zero_min)
+    df_[["log2_fc"]] = log(df_[["fc"]], 2)
+    return(df_)
+  }) -> list_df_fc
+
+list_df %>% 
+  purrr::map(function(df_){
+    write.csv(df_, "~/Downloads/temp_mean.csv", row.names = F, quote = F, col.names = T)  
+    res_Mean = cyclic_HMP(raw_data = "~/Downloads/temp_mean.csv", minper_ = 24)
+    res_Mean %>% 
+      dplyr::mutate(F24_Phase = radian_to_phase(HR_phi)) %>% 
+      dplyr::select(Gene, MetaCycle_JTK_pvalue, MetaCycle_JTK_BH.Q, HR_p.value, HR_q.value, MetaCycle_JTK_amplitude, F24_Phase, MetaCycle_meta2d_Base, MetaCycle_meta2d_AMP, MetaCycle_meta2d_rAMP) %>% 
+      recal_cauchy_p_and_hmp(.) -> res_Mean
+  }) -> list_res_df
+
+list_res_df %>% 
+  purrr::map2(.x=.,.y=names(.),.f=function(df_, assay_){
+    list_df_fc[[assay_]] -> df_fc
+    left_join(df_, df_fc, by="Gene")
+  }) -> res_list
+
+list(
+  Mean = res_list$Mean %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01, !is.na(MetaCycle_meta2d_AMP), fc > 1.6) %>% .$Gene,
+  Nonzero_prop = res_list$Nonzero_prop %>% dplyr::filter(MetaCycle_JTK_BH.Q < 0.01, !is.na(MetaCycle_meta2d_AMP), fc > 1.6) %>% .$Gene #5322 
+) -> genes_list
+ggvenn::ggvenn(genes_list) -> p_ggvenn_new #Fig_3C
 ####
 
 # 11. Plot boxplot (Mean RNA expression and non zero proportion) ----
