@@ -758,25 +758,79 @@ patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p
 
 readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.rna.rds") -> rna.p.value
 readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.gene_activity.rds") -> atac.p.value
-library(VennDiagram)
-library(grid)
-run_venn = function(){
-  list(p_val = rna.p.value) %>% 
-    map(function(x){
-      df_ = x
-      list(
-        `Circadian` = df_ %>% filter(Circadian_p.adj < 0.01) %>% .$Gene,
-        `Transient` = df_ %>% filter(Transient_p.adj < 0.01) %>% .$Gene,
-        `Circadian+Transient` = df_ %>% filter(Circadian_transient_p.adj < 0.01) %>% .$Gene
-      )
-    }) %>% .[[1]] %>% 
-    venn.diagram(., fill = c("#E69F00", "#56B4E9", "#CC79A7"), 
-                 alpha = c(0.8, 0.8, 0.8), lwd =0, filename=NULL,
-                 disable.logging = TRUE) %>% 
-    grobTree()
-}
-p_venn_ = run_venn()
-p_venn_ = ggplot() + annotation_custom(p_venn_) # RNA expression venn diagram (Supp Fig 17)
+readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_rna.rds") -> output.rna.list
+readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_gene_activity.rds") -> output.atac.list
+
+output.rna.list %>% 
+#  .[1:10] %>% 
+  purrr::map(function(df_){
+    gene_ = df_$Gene %>% unique()
+    df_ %>% group_by(ZT) %>% 
+      summarise(Mean_expression = mean(Mean_expression)) %>% 
+      ungroup() -> df_
+    data.frame(Gene = gene_, 
+               Max = df_$Mean_expression %>% max(),
+               Min = df_$Mean_expression %>% min()
+               ) -> df_1
+  }) %>% do.call(rbind, .) -> df_RNA_fc
+
+df_RNA_fc %>% 
+  {
+    df_ = .
+    nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_ %>% dplyr::mutate(fc = (Max+nonzero_min)/(Min+nonzero_min)) %>% 
+      dplyr::mutate(log2_fc = log(fc, 2))
+  } -> df_RNA_fc
+
+output.atac.list %>% 
+  #  .[1:10] %>% 
+  purrr::map(function(df_){
+    gene_ = df_$Gene %>% unique()
+    df_ %>% group_by(ZT) %>% 
+      summarise(Mean_expression = mean(Mean_expression)) %>% 
+      ungroup() -> df_
+    data.frame(Gene = gene_, 
+               Max = df_$Mean_expression %>% max(),
+               Min = df_$Mean_expression %>% min()
+    ) -> df_1
+  }) %>% do.call(rbind, .) -> df_ATAC_fc
+
+df_ATAC_fc %>% 
+  {
+    df_ = .
+    nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_ %>% dplyr::mutate(fc = (Max+nonzero_min)/(Min+nonzero_min)) %>% 
+      dplyr::mutate(log2_fc = log(fc, 2))
+  } -> df_ATAC_fc
+
+left_join(x = rna.p.value, y = df_RNA_fc, by = "Gene") -> rna.p.value
+left_join(x = atac.p.value, y = df_ATAC_fc, by = "Gene") -> atac.p.value
+
+list(
+  Circadian = rna.p.value %>% dplyr::filter(Circadian_p.adj < 0.01, fc > 1.7) %>% .$Gene, #7033 circadian genes
+  Transient = rna.p.value %>% dplyr::filter(Transient_p.adj < 0.01) %>% .$Gene,  #2374 transient genes
+  `Circadian & Transient` = rna.p.value %>% dplyr::filter(Circadian_transient_p.adj < 0.01, fc > 1.7) %>% .$Gene #2343 Circadian & transient genes
+) %>% 
+  ggvenn::ggvenn() -> ggvenn_new #Fig_4D
+
+ggvenn_new -> ggvenn_new_RNA #Fig_4D
+
+list(
+  Circadian = atac.p.value %>% dplyr::filter(Circadian_p.adj < 0.01) %>% .$Gene, #4376 circadian genes
+  Transient = atac.p.value %>% dplyr::filter(Transient_p.adj < 0.01) %>% .$Gene,  #1843 transient genes
+  `Circadian & Transient` = atac.p.value %>% dplyr::filter(Circadian_transient_p.adj < 0.01) %>% .$Gene #1196 Circadian & transient genes
+) %>% 
+  ggvenn::ggvenn() -> ggvenn_old
+
+list(
+  Circadian = atac.p.value %>% dplyr::filter(Circadian_p.adj < 0.01, fc > 1.1) %>% .$Gene, #4376 circadian genes
+  Transient = atac.p.value %>% dplyr::filter(Transient_p.adj < 0.01) %>% .$Gene,  #1843 transient genes
+  `Circadian & Transient` = atac.p.value %>% dplyr::filter(Circadian_transient_p.adj < 0.01, fc > 1.1) %>% .$Gene #1196 Circadian & transient genes
+) %>% 
+  ggvenn::ggvenn() -> ggvenn_new
+
+ggvenn_new -> ggvenn_new_ATAC #Fig_S23A
+
 
 run_venn = function(){
   list(p_val = atac.p.value) %>% 
@@ -1406,7 +1460,7 @@ c("spatial", "temporal") %>%
 i = 0
 names(process_dat_list$temporal) %>% 
   "names<-"(.,.) %>%
-#  .[1:2] %>% 
+  #  .[1:2] %>% 
   map(function(gene_){
     i <<- i + 1
     if(i%%100==0){print(i)}
@@ -1416,7 +1470,7 @@ names(process_dat_list$temporal) %>%
     colnames(df_spatial) %>% {.[-1]} -> peaks
     peaks %>% 
       "names<-"(.,.) %>% 
-#      .[1] %>% 
+      #      .[1] %>% 
       map(function(peak_){
         cor.test(df_spatial[,"Gene_expr"], df_spatial[,peak_], method = "pearson") -> cor_test
         cor_test$p.value -> spatial_pval
@@ -1428,15 +1482,14 @@ names(process_dat_list$temporal) %>%
                    temporal_pval = temporal_pval, temporal_r = temporal_r) -> df_
       }) %>% do.call(rbind, .) -> df_
     df_ %>% dplyr::mutate(spatial_p.adj = p.adjust(spatial_pval, method = "BH"), 
-                    temporal_p.adj = p.adjust(temporal_pval, method = "BH")) -> df_
+                          temporal_p.adj = p.adjust(temporal_pval, method = "BH")) -> df_
   }) %>% do.call(rbind, .) %>% "rownames<-"(., NULL) -> gene_peak_cor_df
 
-readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.rna.rds") -> rna.p.value
 rna.p.value %>%
   {
     df_ = .
-    Circadian_Transient_Genes = df_ %>% dplyr::filter(Circadian_transient_p.adj < 0.01) %>% .$Gene
-    Circadian = df_ %>% dplyr::filter(Circadian_p.adj < 0.01, Transient_p.adj > 0.01, Circadian_transient_p.adj > 0.01) %>% .$Gene
+    Circadian_Transient_Genes = df_ %>% dplyr::filter(Circadian_transient_p.adj < 0.01, fc > 1.7) %>% .$Gene
+    Circadian = df_ %>% dplyr::filter(Circadian_p.adj < 0.01, Transient_p.adj > 0.01, Circadian_transient_p.adj > 0.01, fc > 1.7) %>% .$Gene
     Transient = df_ %>% dplyr::filter(Circadian_p.adj > 0.01, Transient_p.adj < 0.01, Circadian_transient_p.adj > 0.01) %>% .$Gene
     sprintf("Circadian_Transient_Genes: %d\nCircadian: %d\nTransient: %d", length(Circadian_Transient_Genes), length(Circadian), length(Transient))
     
@@ -1491,7 +1544,17 @@ gene_peak_cor_df_2$gene %>% unique() %>%
     df_1 %>% dplyr::mutate(peak = sprintf("%s-%s-%s", seqnames, start, end)) %>% dplyr::select(peak, Distance_to_TSS)-> df_1
     left_join(df_, df_1, by = "peak") %>% dplyr::mutate(gene_len = gene.ref[gene.ref$gene_name == gene_]@ranges@width) -> df_
   }) %>% do.call(rbind, .) -> gene_peak_cor_df_2
-gene_peak_cor_df_2$linked_by = factor(gene_peak_cor_df_2$linked_by)
+
+library(ggbreak)
+gene_peak_cor_df_2$linked_by %>% 
+  table() %>% as.data.frame() %>% 
+  "colnames<-"(., c("linked_by", "count")) %>% 
+  ggplot(aes(x = linked_by, y = count, fill = linked_by)) + 
+  geom_bar(stat = "identity") + 
+  scale_y_break(breaks = c(1000, 5000), scales = 0.4) +  
+  theme_classic() -> p_4I#Fig_4I ----
+
+p_4I$data
 
 gene_peak_cor_df_2 %>% drop_na() %>% 
   dplyr::filter(gene_type != "Others") %>% 
@@ -1499,13 +1562,14 @@ gene_peak_cor_df_2 %>% drop_na() %>%
     gene_type == "Circadian_Transient" ~ "Spatial & Circadian",
     gene_type == "Transient" ~ "Spatial",
     TRUE ~ gene_type
-)) %>% 
+  )) %>% 
   dplyr::mutate(linked_by = case_when(
     linked_by == "spatial" ~ "Spatial",
     linked_by == "temporal" ~ "Circadian", 
     linked_by == "spatial_temporal" ~ "Spatial & Circadian", 
   )) -> gene_peak_cor_df_3
-gene_peak_cor_df_3 %>% drop_na() %>% {write.csv(., "~/Downloads/supplementary_table_2.csv", row.names = F, quote = F)}
+
+gene_peak_cor_df_3 %>% drop_na() %>% {write.csv(., "~/Downloads/supplementary_table_3.csv", row.names = F, quote = F)} #Table S3
 
 # Plot Arntl, Glul and Pck1 (Fig 4G)
 
@@ -1887,17 +1951,12 @@ CoveragePlot(
 )
 ####
 
-# Plot number of CREs (spatial vs spatial+circadian vs circadian)
-library(ggbreak)
-gene_peak_cor_df_2$linked_by %>% 
-  table() %>% as.data.frame() %>% 
-  "colnames<-"(., c("linked_by", "count")) %>% 
-  ggplot(aes(x = linked_by, y = count, fill = linked_by)) + 
-  geom_bar(stat = "identity") + 
-  scale_y_break(breaks = c(1000, 9000), scales = 0.4) +  
-  theme_classic() #Fig_4H ----
-
 # Plot histone mark signals of different groups of CREs
+library(Seurat)
+library(Signac)
+load("~/Dropbox/singulomics/github_rda/trajectory_analysis.rda")
+rm(ATres, heatdata, p_list, RNA_norm, sce);gc()
+
 library(rtracklayer)
 library(GenomicRanges)
 library(ggplot2)
@@ -1943,12 +2002,13 @@ random_regions_genomewide <- createRandomRegions(
 )
 
 list.files("~/Dropbox/singulomics/github_rda/linkpeak/encode_mm10_histone_mark", pattern = "\\.bigwig", full.names = T) %>% 
+  .[c(1,3)] %>% 
   "names<-"(., gsub("/.+/Encode_(.+?)_.+", "\\1", .)) %>% 
   map(function(bigwig_){
     print(bigwig_)
     bw <- import.bw(bigwig_)
     
-    levels(gene_peak_cor_df_2$linked_by) %>% 
+    levels(factor(gene_peak_cor_df_2$linked_by)) %>% 
       "names<-"(.,.) %>% 
       #  .[1] %>% 
       map(function(linked_by_){
@@ -1984,6 +2044,7 @@ list.files("~/Dropbox/singulomics/github_rda/linkpeak/encode_mm10_histone_mark",
           }, .keep = T) %>% do.call(rbind, .)
         
       }) -> mean_signal_list
+    print(mean_signal_list)
     
     c("Random_peaks") %>% 
       "names<-"(.,.) %>% 
@@ -2126,63 +2187,70 @@ df_bw_signal_list %>%
   }) -> df_bw_signal_list
 
 list(
-  H3K9ac = df_bw_signal_list$H3K9ac %>% 
-    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
-    geom_boxplot() + 
-#    scale_y_break(breaks = c(4,20), scales = 0.5) + 
-    scale_y_break(breaks = c(3,20), scales = 0.5) + 
-    theme_classic() + 
-    ylab("H3K9ac signal") + 
-    theme(legend.position = "none") + 
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
-    xlab(NULL),
+#  H3K9ac = df_bw_signal_list$H3K9ac %>% 
+#    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+#    geom_boxplot() + 
+#    #    scale_y_break(breaks = c(4,20), scales = 0.5) + 
+#    scale_y_break(breaks = c(3,20), scales = 0.5) + 
+#    theme_classic() + 
+#    ylab("H3K9ac signal") + 
+#    theme(legend.position = "none") + 
+#    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+#    xlab(NULL),
   
   H3K27ac = df_bw_signal_list$H3K27ac %>% 
+    dplyr::filter(linked_by %in% c("temporal", "spatial_temporal", "spatial", "Random region\n(Genomewide)")) %>% 
     ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
-    geom_boxplot() + 
-#    scale_y_break(breaks = c(7,20), scales = 0.5) + 
-    scale_y_break(breaks = c(6,10), scales = 0.5) + 
+    geom_boxplot(outlier.shape = NA) + 
+    coord_cartesian(ylim = c(0,15)) + 
+    #    scale_y_break(breaks = c(7,20), scales = 0.5) + 
+#    scale_y_break(breaks = c(6,10), scales = 0.5) + 
     theme_classic() + 
     ylab("H3K27ac signal") + 
     theme(legend.position = "none") + 
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) + 
     xlab(NULL),
   
   H3K4me1 = df_bw_signal_list$H3K4me1 %>% 
+  dplyr::filter(linked_by %in% c("temporal", "spatial_temporal", "spatial", "Random region\n(Genomewide)")) %>% 
     ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
-    geom_boxplot() + 
-#    scale_y_break(breaks = c(4,20), scales = 0.5) + 
-#    scale_y_break(breaks = c(3,6), scales = 0.5) + 
-    scale_y_break(breaks = c(2.5,6), scales = 0.5) + 
+    geom_boxplot(outlier.shape = NA) + 
+    coord_cartesian(ylim = c(0,4)) + 
+    #    scale_y_break(breaks = c(4,20), scales = 0.5) + 
+    #    scale_y_break(breaks = c(3,6), scales = 0.5) + 
+#    scale_y_break(breaks = c(2.5,6), scales = 0.5) + 
     theme_classic() + 
     ylab("H3K4me1 signal") + 
     theme(legend.position = "none") + 
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
-    xlab(NULL),
-  
-  H3K4me3 = df_bw_signal_list$H3K4me3 %>% 
-    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
-    geom_boxplot() + 
-#    scale_y_break(breaks = c(6,20), scales = 0.5) + 
-    scale_y_break(breaks = c(4.5,20), scales = 0.5) + 
-    theme_classic() + 
-    ylab("H3K4me3 signal") + 
-    theme(legend.position = "none") + 
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
-    xlab(NULL),
-  
-  H3K27me3 = df_bw_signal_list$H3K27me3 %>% 
-    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
-    geom_boxplot() + 
-#    scale_y_break(breaks = c(4,20), scales = 0.5) + 
-    scale_y_break(breaks = c(1,5), scales = 0.5) + 
-#    scale_y_break(breaks = c(0.25,2), scales = 0.5) + 
-    theme_classic() + 
-    ylab("H3K27me3 signal")+
-    theme(legend.position = "none") + 
-    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) + 
     xlab(NULL)
+  
+#  H3K4me3 = df_bw_signal_list$H3K4me3 %>% 
+#    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+#    geom_boxplot() + 
+#    #    scale_y_break(breaks = c(6,20), scales = 0.5) + 
+#    scale_y_break(breaks = c(4.5,20), scales = 0.5) + 
+#    theme_classic() + 
+#    ylab("H3K4me3 signal") + 
+#    theme(legend.position = "none") + 
+#    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+#    xlab(NULL),
+#  
+#  H3K27me3 = df_bw_signal_list$H3K27me3 %>% 
+#    ggplot(aes(x = linked_by, y = mean_signal, fill = linked_by)) + 
+#    geom_boxplot() + 
+#    #    scale_y_break(breaks = c(4,20), scales = 0.5) + 
+#    scale_y_break(breaks = c(1,5), scales = 0.5) + 
+#    #    scale_y_break(breaks = c(0.25,2), scales = 0.5) + 
+#    theme_classic() + 
+#    ylab("H3K27me3 signal")+
+#    theme(legend.position = "none") + 
+#    theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5)) + 
+#    xlab(NULL)
 ) -> p_histone_mark
 
-p_histone_mark$H3K27ac+p_histone_mark$H3K4me1 # Fig 4I
+p_histone_mark$H3K27ac+p_histone_mark$H3K4me1 # Fig_4I
+
+pairwise.t.test(x = p_histone_mark$H3K27ac$data$mean_signal, g = p_histone_mark$H3K27ac$data$linked_by)
+pairwise.t.test(x = p_histone_mark$H3K4me1$data$mean_signal, g = p_histone_mark$H3K4me1$data$linked_by)
 ####
