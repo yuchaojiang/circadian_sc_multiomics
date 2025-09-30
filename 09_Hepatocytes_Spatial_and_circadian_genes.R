@@ -209,15 +209,68 @@ c("rna", "gene_activity") %>%
   }) -> list_p_value 
 
 # 4. Resolution tuning ----
+readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_rna.rds") -> output.rna.list
+readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_gene_activity.rds") -> output.atac.list
+
+output.rna.list %>% 
+  #  .[1:10] %>% 
+  purrr::map(function(df_){
+    gene_ = df_$Gene %>% unique()
+    df_ %>% group_by(ZT) %>% 
+      summarise(Mean_expression = mean(Mean_expression)) %>% 
+      ungroup() -> df_
+    data.frame(Gene = gene_, 
+               Max = df_$Mean_expression %>% max(),
+               Min = df_$Mean_expression %>% min()
+    ) -> df_1
+  }) %>% do.call(rbind, .) -> df_RNA_fc
+
+df_RNA_fc %>% 
+  {
+    df_ = .
+    nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_ %>% dplyr::mutate(fc = (Max+nonzero_min)/(Min+nonzero_min)) %>% 
+      dplyr::mutate(log2_fc = log(fc, 2))
+  } -> df_RNA_fc
+
+output.atac.list %>% 
+  #  .[1:10] %>% 
+  purrr::map(function(df_){
+    gene_ = df_$Gene %>% unique()
+    df_ %>% group_by(ZT) %>% 
+      summarise(Mean_expression = mean(Mean_expression)) %>% 
+      ungroup() -> df_
+    data.frame(Gene = gene_, 
+               Max = df_$Mean_expression %>% max(),
+               Min = df_$Mean_expression %>% min()
+    ) -> df_1
+  }) %>% do.call(rbind, .) -> df_ATAC_fc
+
+df_ATAC_fc %>% 
+  {
+    df_ = .
+    nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_ %>% dplyr::mutate(fc = (Max+nonzero_min)/(Min+nonzero_min)) %>% 
+      dplyr::mutate(log2_fc = log(fc, 2))
+  } -> df_ATAC_fc
+
+df_RNA_fc %>% dplyr::filter(fc > 1.7) %>% .$Gene -> RNA_genes_fc_
+df_ATAC_fc %>% dplyr::filter(fc > 1.1) %>% .$Gene -> ATAC_genes_fc_
+
 ggroc_list = list()
 density_list = list()
 c("rna", "gene_activity") %>% 
   "names<-"(.,.) %>% 
   map(function(x){
     seq_ = x
+    if (seq_ == "rna"){
+      se_genes = RNA_genes_fc_
+    }else{
+      se_genes = ATAC_genes_fc_
+    }
     print(seq_)
     sprintf("res_%s", seq(0.5,20,0.5)) %>% 
-#      c("res_2.5") %>% 
+      #      c("res_2.5") %>% 
       "names<-"(.,.) %>% 
       map(function(x){
         res_ = x
@@ -235,9 +288,9 @@ c("rna", "gene_activity") %>%
           map(function(x){
             threshold_ = x
             threshold_name_ = sprintf("p_%s", threshold_)
-            n_circadian = df_ %>% filter(Circadian_p.adj<=threshold_) %>% nrow()
+            n_circadian = df_ %>% filter(Circadian_p.adj<=threshold_, Gene %in% se_genes) %>% nrow()
             n_transient = df_ %>% filter(Transient_p.adj<=threshold_) %>% nrow()
-            n_both = df_ %>% filter(Circadian_transient_p.adj<=threshold_) %>% nrow()
+            n_both = df_ %>% filter(Circadian_transient_p.adj<=threshold_, Gene %in% se_genes) %>% nrow()
             data.frame(resolution = res_, n_circadian, n_transient, n_both, n_metacell, threshold = threshold_) -> df_1
             df_1 %>% mutate(resolution = gsub("res_(.+)", "\\1", resolution) %>% as.numeric()) -> df_1
             
@@ -254,7 +307,7 @@ c("rna", "gene_activity") %>%
             rbind(df_pos, df_neg) %>% 
               mutate(response = ifelse(group == "pos.genes", 0, 1)) -> df_roc
             pROC::roc(df_roc$response, df_roc$Circadian_p.adj) -> roc_obj
-#            ggroc_list[[seq_]][[res_]] <<- roc_obj
+            #            ggroc_list[[seq_]][[res_]] <<- roc_obj
             ggroc_list[[threshold_name_]][[seq_]][[res_]] <<- roc_obj
             auc_ = roc_obj$auc %>% as.numeric()
             df_1 %>% mutate(auc = auc_) -> df_1
@@ -1570,6 +1623,58 @@ gene_peak_cor_df_2 %>% drop_na() %>%
   )) -> gene_peak_cor_df_3
 
 gene_peak_cor_df_3 %>% drop_na() %>% {write.csv(., "~/Downloads/supplementary_table_3.csv", row.names = F, quote = F)} #Table S3
+
+#CRE motif analysis ----
+load("~/Dropbox/singulomics/github_rda/trajectory_analysis.rda")
+rm(ATres, heatdata, p_list, RNA_norm, sce);gc()
+DefaultAssay(sc) = "ATAC"
+#read.csv(file = "~/Downloads/supplementary_table_2.csv", header = T, stringsAsFactors = F) -> gene_peak_cor_df_2
+#gene_peak_cor_df_2 %>% head()
+
+gene_peak_cor_df_2 %>% dplyr::filter(!is.na(linked_by)) %>% 
+  .$linked_by %>% 
+#gene_peak_cor_df_2$linked_by %>% 
+  unique() %>% 
+  "names<-"(.,.) %>% 
+  map(function(linked_by_){
+    print(linked_by_)
+    gene_peak_cor_df_2 %>% dplyr::filter(linked_by == linked_by_) %>% .$peak %>% unique() -> peaks
+    sc@assays$ATAC@counts %>% rownames() %>% unique() -> background_peaks
+    enriched.motifs = FindMotifs(object = sc, features = peaks, background = background_peaks) -> df_
+  }) -> enriched.TF.motif
+
+
+enriched.TF.motif$temporal %>% dplyr::arrange(p.adjust) %>% .[1:10, ] -> circadian_CRE_TF_motif
+enriched.TF.motif$spatial %>% dplyr::arrange(p.adjust) %>% .[1:10, ] -> spatial_CRE_TF_motif
+enriched.TF.motif$spatial_temporal %>% dplyr::arrange(p.adjust) %>% .[1:10, ] -> spatial_circadian_CRE_TF_motif
+#save(enriched.TF.motif, file = "~/Downloads/CRE_enriched_TF_motifs.rda")
+#load("~/Downloads/CRE_enriched_TF_motifs.rda")
+#write.csv(enriched.TF.motif$Circadian, file = "~/Dropbox/singulomics/00_manuscript/todos/Circadian_CREs_TF_motif_enrichment.csv", col.names = T, quote = F)
+#write.csv(enriched.TF.motif$Spatial, file = "~/Dropbox/singulomics/00_manuscript/todos/Spatial_CREs_TF_motif_enrichment.csv", col.names = T, quote = F)
+#write.csv(enriched.TF.motif$`Spatial & Circadian`, file = "~/Dropbox/singulomics/00_manuscript/todos/Spatial_and_circadian_CREs_TF_motif_enrichment.csv", col.names = T, quote = F)
+
+circadian_CRE_TF_motif %>% 
+  dplyr::mutate(motif.name = factor(motif.name, levels = motif.name)) %>% 
+  ggplot(aes(x = motif.name, y = -log(p.adjust, 10))) + 
+  geom_bar(stat = "identity", fill = "#6f93cc") + 
+  geom_hline(yintercept = -log(0.1, 10), color = "red", linetype = "dashed") + 
+  theme_classic() -> p_circadian
+
+spatial_CRE_TF_motif %>% 
+  dplyr::mutate(motif.name = factor(motif.name, levels = motif.name)) %>% 
+  ggplot(aes(x = motif.name, y = -log(p.adjust, 10))) + 
+  geom_bar(stat = "identity", fill = "#f3766d") + 
+  geom_hline(yintercept = -log(0.1, 10), color = "red", linetype = "dashed") + 
+  theme_classic() -> p_spatial
+
+spatial_circadian_CRE_TF_motif %>% 
+  dplyr::mutate(motif.name = factor(motif.name, levels = motif.name)) %>% 
+  ggplot(aes(x = motif.name, y = -log(p.adjust, 10))) + 
+  geom_bar(stat = "identity", fill = "#2fb24b") + 
+  geom_hline(yintercept = -log(0.1, 10), color = "red", linetype = "dashed") + 
+  theme_classic() -> p_spatialtemporal
+
+patchwork::wrap_plots(p_spatial, p_spatialtemporal, p_circadian, ncol = 3) -> p #Fig_S24
 
 # Plot Arntl, Glul and Pck1 (Fig 4G)
 
