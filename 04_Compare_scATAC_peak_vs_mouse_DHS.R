@@ -30,7 +30,7 @@ library(ChIPpeakAnno)
 ChIPpeakAnno::findOverlapsOfPeaks(atac_peak, jerome_dhs, connectedPeaks = "keepAll") -> peak_overlap
 #####
 
-#Supp_Fig_6A ----
+#Fig_S6A ----
 venn <- makeVennDiagram(peak_overlap, totalTest = 200000,
                         fill = c("#009E73", "#F0E442"),
                         col = c("#D55E00", "#0072B2"),

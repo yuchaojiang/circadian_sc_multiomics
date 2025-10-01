@@ -44,7 +44,7 @@ c("nCount_ATAC", "nFeature_ATAC","TSS.enrichment","nucleosome_signal",
 #    }
     return(p)
   }) -> p_list
-patchwork::wrap_plots(p_list, ncol = 4) -> p_pre_QC #Supp_Fig_2A ----
+patchwork::wrap_plots(p_list, ncol = 4) -> p_pre_QC #Fig_S2A ----
 
 sc <- subset(
   x = sc,
@@ -82,7 +82,7 @@ c("nCount_ATAC", "nFeature_ATAC","TSS.enrichment","nucleosome_signal",
     return(p)
   }) -> p_list
 
-patchwork::wrap_plots(p_list, ncol = 4) -> p_after_QC #Supp_Fig_2B ----
+patchwork::wrap_plots(p_list, ncol = 4) -> p_after_QC #Fig_S2B ----
 
 median(sc$nCount_ATAC)
 median(sc$nCount_RNA)

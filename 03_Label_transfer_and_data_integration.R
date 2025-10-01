@@ -115,8 +115,8 @@ lca_nuc_integrated <- FindClusters(lca_nuc_integrated, assay="RNA_integrated", r
 lca_nuc_integrated@meta.data %>% mutate(rna_integrated_cluster = seurat_clusters) -> lca_nuc_integrated@meta.data
 
 DimPlot(lca_nuc_integrated, group.by = "rna_integrated_cluster", label = TRUE, reduction = "rna_integrated_umap", repel = TRUE)
-DimPlot(lca_nuc_integrated, group.by = "annot", label = TRUE, reduction = "rna_integrated_umap", repel = TRUE) -> p1 # Supp_Fig_4A ----
-DimPlot(lca_nuc_integrated, group.by = "sample", label = TRUE, reduction = "rna_integrated_umap", repel = TRUE) -> p2 # Supp_Fig_4A ----
+DimPlot(lca_nuc_integrated, group.by = "annot", label = TRUE, reduction = "rna_integrated_umap", repel = TRUE) -> p1 # Fig_S4A ----
+DimPlot(lca_nuc_integrated, group.by = "sample", label = TRUE, reduction = "rna_integrated_umap", repel = TRUE) -> p2 # Fig_S4A ----
 ggpubr::ggarrange(p1, p2, ncol = 2, legend = "top")
 save(lca_nuc_integrated, file = "~/Dropbox/singulomics/github_rda/lca_nuc_integrated.rda")
 ####
@@ -947,7 +947,7 @@ sc@meta.data$celltype %>% unique() %>%
       theme(plot.title = element_text(hjust = 0.5)) + 
       theme(axis.title.x = element_blank()) + 
       theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-  }) -> p_list #Supp_Fig_4B ----
+  }) -> p_list #Fig_S4B ----
 
 ggpubr::ggarrange(plotlist = p_list, ncol = 2, nrow = 4, common.legend = T, legend = "top")
 
@@ -963,7 +963,7 @@ c("B cells", "Cholangiocytes", "Endothelial cells", "Fibroblasts", "Hepatocytes"
       geom_histogram(fill = "skyblue", color = "black") + 
       theme_classic() -> p
     p + ggtitle(celltype_) -> p
-  }) -> p_list #Supp_Fig_4C ----
+  }) -> p_list #Fig_S4C ----
 patchwork::wrap_plots(p_list, ncol = 7)
 
 saveRDS(sc, "~/Dropbox/singulomics/github_rda/integrated_sc_all_cell_types.rds")
@@ -1018,7 +1018,7 @@ pca_motif<-prcomp(t(sc@assays[["MOTIF"]]@data))$x[,1:50]
 sc[["motif.pca"]] <- CreateDimReducObject(embeddings = pca_motif, key = "motifpca_", assay = "MOTIF")
 sc <- RunUMAP(sc, reduction = "motif.pca", dims = 1:nDims, reduction.name = "motif_umap")
 
-#Supp_Fig_3 and Fig_1B ----
+#Fig_S3 and Fig_1B ----
 DimPlot(sc, group.by = "celltype", label = TRUE, reduction = "umap.rna", repel = TRUE) + 
   ggtitle("scRNA-seq") -> p1
 DimPlot(sc, group.by = "celltype", label = TRUE, reduction = "umap.atac", repel = TRUE) + 
