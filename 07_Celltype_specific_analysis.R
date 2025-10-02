@@ -962,7 +962,7 @@ c("Hepatocytes", "Endothelial_cells", "Fibroblasts", "Kupffer_cells") %>%
         df_2 %>% pivot_wider(names_from = ZT, values_from = Mean_expr) -> df_2
         left_join(df_pval, df_2, by = "Gene") -> df_pval
       })
-  }) -> df_list_supp_table_1 #Supp_table_1
+  }) -> df_list_supp_table_1 #Table_S1
 
 # 7. Upset plots and venndiagram of cell celltype specfic genes (RNA expression and ATAC activity) ----
 library(ggupset)
