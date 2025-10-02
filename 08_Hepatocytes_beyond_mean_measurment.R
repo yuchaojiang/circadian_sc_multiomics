@@ -818,8 +818,8 @@ c("Arntl", "Per1") %>%
     patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p
   }) -> p_list_6
 
-p_list_6$Arntl #Supp Fig 26
-p_list_6$Per1 #Supp Fig 26
+p_list_6$Arntl #Fig_S28A
+p_list_6$Per1 #Fig_S28B
 
 # 14. Burst frequency (Nr1d1, Cry1, Bmal1) ----
 setwd("~/Dropbox/Research/singulomics/")
@@ -866,7 +866,7 @@ p3=p3+geom_point(data=Nr1d1.dot, aes(x=time, y=avg, color='#CC6666'), size=1, al
 library(patchwork)
 p=p3+p1+p2
 p
-ggsave(filename='bursting/bursting_mean.pdf', width=13, height=3.5, plot=p)
+ggsave(filename='bursting/bursting_mean.pdf', width=13, height=3.5, plot=p) #Fig_S15
 ####
 
 # 16. Pair-wise correlation (Nonzero_mean, gini, Nonzero_Prop, cv, and mean) ----
@@ -1125,7 +1125,7 @@ sc = sc[,setdiff(colnames(sc), non_annotaed_barcode)]
 save(sc, file = "~/Dropbox/singulomics/github_rda/GSE117295_RAW_Mouse_SCN/seurat_object.rda")
 
 sc <- SCTransform(sc, verbose = FALSE, return.only.var.genes = FALSE) %>% RunPCA() %>% RunUMAP(dims = 1:50, reduction.name = 'umap.rna', reduction.key = 'rnaUMAP_')
-p1 <- DimPlot(sc, reduction = "umap.rna", group.by='cell_type', label = TRUE, label.size = 2.5, repel = TRUE) + ggtitle("10X sc RNA")  #Supp Fig 15A
+p1 <- DimPlot(sc, reduction = "umap.rna", group.by='cell_type', label = TRUE, label.size = 2.5, repel = TRUE) + ggtitle("10X sc RNA")  #Fig_S17A
 
 sc@meta.data %>% dplyr::mutate(celltype = case_when(
   grepl("Neurons", cell_type) ~ "Neurons",
@@ -1319,14 +1319,14 @@ data.frame(
       theme_classic()
   } -> p3
 
-patchwork::wrap_plots(p1,p2,p3, ncol = 3) #Fig 3E
+patchwork::wrap_plots(p1,p2,p3, ncol = 3) #Fig_3E
 
 #Venn diagram of cyclic genes (mean vs nonzero)
 list(
   Mean = list_RNA_norm_pval$Neurons1 %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
   Nonzero = list_non_zero_prop_pval$Neurons1 %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene
 ) %>% 
-  ggvenn::ggvenn() #Supp Fig 15C
+  ggvenn::ggvenn() #Fig_S17C
 
 list(
   Mean = list_RNA_norm_pval$Ependymocytes %>% dplyr::filter(cauchy_BH.Q < 0.05) %>% .$Gene,
@@ -1392,7 +1392,7 @@ c("Neurons1", "Ependymocytes") %>%
     return(p1)
   }) -> p1
 #p1$Neurons1+p1$Ependymocytes
-p1$Neurons1 #Supp Fig 15D
+p1$Neurons1 #Fig_S17D
 
 
 c("Neurons1", "Ependymocytes") %>% 
@@ -1436,7 +1436,7 @@ print(t.test(list_val$Mean, list_val$Nonzero))
 return(p2)
 }) -> p2
 #p2$Neurons1+p2$Ependymocytes
-p2$Neurons1 #Supp Fig 15D
+p2$Neurons1 #Fig_S17D
 
 # 18. Validation drosophila brain ----
 library(tidyverse)

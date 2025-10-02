@@ -67,7 +67,7 @@ map2(DEG_list, names(DEG_list), function(x,y){
   return(p)
 }) -> p_list
 
-cowplot::plot_grid(plotlist = p_list, ncol = 4, nrow = 2) #Supp_Fig_5C ----
+cowplot::plot_grid(plotlist = p_list, ncol = 4, nrow = 2) #Fig_S5C ----
 
 # 3. Find overlapping celltype specific DEGs (Our data vs Guilliam's data) ----
 Idents(sc) %>% as.data.frame() %>% 
@@ -222,7 +222,7 @@ list_tmp %>%
       xlab("scRNA (Normalized RNA expr.)") -> p
     p + ggtitle(sprintf("%s: n=%s\nr=%s", celltype_, n_genes, cor_)) -> p
   }) -> p_list
-patchwork::wrap_plots(p_list, ncol = 4) #Supp_Fig_5b ----
+patchwork::wrap_plots(p_list, ncol = 4) #Fig_S5b ----
 
 #Plot celltype specific heatmap
 rm(list=ls())
@@ -319,6 +319,6 @@ sc$celltype
 DoHeatmap(sc, features = features_, group.by = "celltype", assay = "SCT", slot = "scale.data", label = T) + 
   scale_fill_gradientn(colors = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name =
                                                                   "RdYlBu")))(100)) + 
-  theme(axis.text.y = element_blank()) #Supp Fig 5A
+  theme(axis.text.y = element_blank()) #Fig_S5A
 rm(sc)
 gc()

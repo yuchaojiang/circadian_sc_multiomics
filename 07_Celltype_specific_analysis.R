@@ -612,7 +612,7 @@ list(
       xlab(NULL) + ylab(NULL) + 
       theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
   }) -> p_list
-patchwork::wrap_plots(p_list, nrow = 3) #Fig_2A and Supp Fig_12B ----
+patchwork::wrap_plots(p_list, nrow = 3) #Fig_2A and Supp Fig_S14B ----
 
 #Plot RNA expression and ATAC activity (line plots) (cell type specific)
 c("replicate_3", "replicate_4", "replicate_5", "replicate_10") %>% 
@@ -695,7 +695,7 @@ list_tmp_1 %>%
   }) -> p_list
 
 p_list_1 = c(p_list$replicate_10$RNA, p_list$replicate_10$gene_activity)
-ggpubr::ggarrange(plotlist = p_list_1, ncol = 13, nrow = 2, common.legend = T, legend = "top") -> p_clock_gene_line_plot # Supp Fig_10
+ggpubr::ggarrange(plotlist = p_list_1, ncol = 13, nrow = 2, common.legend = T, legend = "top") -> p_clock_gene_line_plot # Fig_S10
 
 # 4. Draw violin plot for celltype specific marker genes (RNA expression and ATAC activity) ----
 

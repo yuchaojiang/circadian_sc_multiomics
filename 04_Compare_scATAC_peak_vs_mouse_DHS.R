@@ -236,13 +236,13 @@ df_tmp %>%
   ggplot(aes(x = Group, y = H3K27ac_signal, fill = Group)) + 
   geom_boxplot() + 
   scale_y_break(breaks = c(7,25), scales = 0.5) + 
-  theme_classic() -> p1 #Supp_Fig_6B ----
+  theme_classic() -> p1 #Fig_S6B ----
 
 df_tmp %>% 
   ggplot(aes(x = Group, y = H3K4me1_signal, fill = Group)) + 
   geom_boxplot() +
   scale_y_break(breaks = c(3,6), scales = 0.5) + 
-  theme_classic() -> p2 #Supp_Fig_6B ----
+  theme_classic() -> p2 #Fig_S6B ----
 
 
 my_comparisons = list(c("Overlapped", "Mouse_DHS"), 
@@ -296,4 +296,4 @@ se_genes %>% "names<-"(., .) %>%
   }) -> p_list
 
 #ggpubr::ggarrange(plotlist = p_list, ncol = 3, nrow = 5)
-ggpubr::ggarrange(p_list$Arntl, p_list$Nr1d1, p_list$Dbp, ncol = 3) #Supp_Fig_6C ----
+ggpubr::ggarrange(p_list$Arntl, p_list$Nr1d1, p_list$Dbp, ncol = 3) #Fig_S6C ----
