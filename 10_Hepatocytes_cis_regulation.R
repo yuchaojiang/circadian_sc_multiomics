@@ -869,9 +869,9 @@ to_plot$newstate=factor(to_plot$newstate, levels= c('Transcription', 'TSS',
 library(ggplot2)
 p=ggplot(data=to_plot, aes(x=newstate, y=Percentage, fill=group)) +
   geom_bar(stat="identity", color="black", position=position_dodge())+
-  theme_minimal() + xlab("chromHMM states")+ scale_fill_manual(values=c('#999999','#E69F00')) #Fig 5F
+  theme_minimal() + xlab("chromHMM states")+ scale_fill_manual(values=c('#999999','#E69F00')) #Fig_5F
 
-ggsave(plot = p, filename = "~/Dropbox/singulomics/github_rda/TRIPOD/chromatin_state_validation_new_scaled.pdf") #Fig 5F
+ggsave(plot = p, filename = "~/Dropbox/singulomics/github_rda/TRIPOD/chromatin_state_validation_new_scaled.pdf") #Fig_5F
 
 ## Hi-C validation ##
 trios_res_df_2 = trios_res_scaled_df_1
@@ -1193,7 +1193,7 @@ random.p=10^(-pvals$`-log10_P`[pvals$group=='random'])
 tripod.p=pmin(70, (pvals$`-log10_P`[pvals$group=='TRIPOD']))
 random.p=(pvals$`-log10_P`[pvals$group=='random'])
 
-pdf(file='~/Dropbox/singulomics/github_rda/HI_C_validation_new.pdf', width=5, height=4) #Fig 5F
+pdf(file='~/Dropbox/singulomics/github_rda/HI_C_validation_new.pdf', width=5, height=4) #Fig_5F
 hist(tripod.p, breaks=seq(0,70,2), col=adjustcolor("#E69F00", alpha.f=0.7), xlab='-log(p)', main='Distribution of -log(p) \nfrom hypergeometric test')
 hist(random.p, add=TRUE, breaks=seq(0,70,2), col=adjustcolor("#999999", alpha.f = 0.7))
 legend('topright', fill=c(adjustcolor("#999999", alpha.f=0.7), adjustcolor("#E69F00", alpha.f = 0.7)),
@@ -1574,7 +1574,7 @@ venn_list_df_ %>% filter(macs2_threshold == "q_0.1" & max_gap == 0) %>%
   geom_bar(stat = "identity", position = "dodge", width = 0.5) +
   theme_classic() + 
   theme(legend.position = "top") +
-  ylab("Fraction of peaks overlapping with ChIP-seq peaks") #Fig 5F
+  ylab("Fraction of peaks overlapping with ChIP-seq peaks") #Fig_5F
 
   ## Plot CRE phase vs Target gene phase (ARNTL and NR1D1) ##
   trios_res_df_2 %>% 
@@ -1627,7 +1627,7 @@ trios_res_df_3 %>% dplyr::filter(TF == "Arntl") %>%
 #      geom_ribbon(aes(xmin = (TF_phase-12)-2.5, xmax = (TF_phase-12)+2.5), fill = "green", alpha = 0.2) + 
       theme_classic() + 
       ggtitle(sprintf("r=%s", cor_))
-  } -> p_arntl#Fig 5E
+  } -> p_arntl#Fig_5E
 
 trios_res_df_3 %>% dplyr::filter(TF == "Nr1d1") %>% 
   dplyr::mutate(peak_phase = case_when(
@@ -1661,8 +1661,8 @@ trios_res_df_3 %>% dplyr::filter(TF == "Nr1d1") %>%
 #      geom_ribbon(aes(xmin = (TF_phase+12)-2.5, xmax = (TF_phase+12)+2.5), fill = "green", alpha = 0.2) + 
       theme_classic() + 
       ggtitle(sprintf("r=%s", cor_))
-  } -> p_nr1d1 #Fig 5E
-patchwork::wrap_plots(p_arntl, p_nr1d1) #Fig 5E
+  } -> p_nr1d1 #Fig_5E
+patchwork::wrap_plots(p_arntl, p_nr1d1) #Fig_5E
 ####
 
 ## Add HC_C annotation ##
@@ -1849,13 +1849,13 @@ plot_trios(TF_ = "Nr5a2", target_gene_ = "Arntl", CRE_ = "chr7-113219262-1132202
 trios_res_df_2_1 %>% dplyr::filter(TF == "Nfyb", gene == "Arntl")
 plot_trios(TF_ = "Nfyb", target_gene_ = "Arntl", CRE_ = "chr7-113230019-113230865")
 plot_trios(TF_ = "Nfyb", target_gene_ = "Arntl", CRE_ = "chr7-113242462-113243284") + theme_classic() -> p4
-patchwork::wrap_plots(p1, p2, p3, p4, nrow = 2, guides = "collect") #Supp Fig 23
+patchwork::wrap_plots(p1, p2, p3, p4, nrow = 2, guides = "collect") #Fig_S25
 
 ## Plot trios (E-box, D-box, RORE) ##
 plot_trios(TF_ = "Clock", target_gene_ = "Per1", CRE_ = "chr11-69094571-69095496") -> p1
 plot_trios(TF_ = "Rora", target_gene_ = "Npas2", CRE_ = "chr1-39192324-39193159") -> p2
 plot_trios(TF_ = "Dbp", target_gene_ = "Per2", CRE_ = "chr1-91459045-91459906") -> p3
-patchwork::wrap_plots(p1, p2, p3, nrow = 1, guides = "collect") #Fig 5B
+patchwork::wrap_plots(p1, p2, p3, nrow = 1, guides = "collect") #Fig_5B
 
 ####
 
@@ -1895,7 +1895,7 @@ RNA_bw = read_coldata(bws = RNA_bw, build = "mm10")
 RNA_bw$bw_sample_names = sprintf("RNA_ZT%s", seq(2,22,4))
 ####
 
-## Fig 5C ##
+## Fig_5C ##
 plot_trios(TF_ = "Clock", target_gene_ = "Nr1d1", CRE_ = "chr11-98747104-98747945") -> p1
 plot_trios(TF_ = "Arntl", target_gene_ = "Nr1d1", CRE_ ="chr11-98775032-98775930") -> p2
 
@@ -2054,15 +2054,15 @@ list(WT = Bmal1_WT_df, KO = Bmal1_KO_df) %>%
   geom_line() + 
   geom_ribbon(aes(ymin = expression - sd, ymax = expression + sd), alpha = 0.3, color = NA) + 
   scale_x_continuous(breaks = seq(2,22,4)) +
-  theme_classic() -> p_KO #Fig 5C
+  theme_classic() -> p_KO #Fig_5C
 
 res_pval_KO %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Nr1d1")
 res_pval_WT %>% dplyr::mutate(cauchy_p = sprintf("%.2e", cauchy_p)) %>% dplyr::filter(Gene == "Nr1d1")
 
 
-p1+p2+p_chipseq+p_HI_C+p_KO #Fig 5C
+p1+p2+p_chipseq+p_HI_C+p_KO #Fig_5C
 
-## Plot track plots Fig 5D##
+## Plot track plots Fig_5D##
 extend_region = function(upstream, downstream, CRE){
  start = gsub(".+:(.+?)-(.+)", "\\1", CRE) %>% as.integer() 
  end = gsub(".+:(.+?)-(.+)", "\\2", CRE)  %>% as.integer()

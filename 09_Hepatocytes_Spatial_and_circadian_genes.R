@@ -333,7 +333,7 @@ ggroc_list$p_0.01 %>%
       scale_color_gradient(low = "blue", high = "red") + 
       theme_classic() + 
       ggtitle(sprintf("%s: H1 model. 12435 genes in total", seq_))-> p_roc
-  }) -> p_roc #Supp_Fig8B
+  }) -> p_roc #Fig_S8B
 
 c(0.05, 0.01) %>% 
   "names<-"(., sprintf("p_%s", .)) %>% 
@@ -349,7 +349,7 @@ c(0.05, 0.01) %>%
       scale_color_manual(values = c("blue", "red")) +
       geom_vline(xintercept = 25, linetype = "dashed") + 
       theme_classic() -> p_auc
-  }) -> p_auc #Supp_Fig8C
+  }) -> p_auc #Fig_S8C
 
 df_summary %>% 
   filter(threshold == 0.01) %>% 
@@ -359,7 +359,7 @@ df_summary %>%
            geom_smooth() + 
   scale_color_manual(values = c("blue", "red")) +
   geom_vline(xintercept = 25, linetype = "dashed") + 
-           theme_classic() -> p_n_circadian #Supp_Fig8D
+           theme_classic() -> p_n_circadian #Fig_S8D
 
 df_summary[, c("resolution", "n_metacell")] %>% 
   distinct() %>%
@@ -368,7 +368,7 @@ df_summary[, c("resolution", "n_metacell")] %>%
   geom_smooth(color = "black") + 
   geom_vline(xintercept = 2.5, linetype = "dashed") +
   geom_hline(yintercept = 25, linetype = "dashed") +
-  theme_classic() -> p_res_nmetacell #Supp_Fig8A
+  theme_classic() -> p_res_nmetacell #Fig_S8A
 
 density_list %>% 
   map2(.x=.,.y=names(.),.f=function(x,y){
@@ -385,7 +385,7 @@ density_list %>%
   scale_color_gradient(low = "blue", high = "red") +
   geom_density() + 
   theme_classic() + 
-  facet_wrap(~assay, scales = "free", nrow = 1) -> p_density #Supp_Fig8E
+  facet_wrap(~assay, scales = "free", nrow = 1) -> p_density #Fig_S8E
 
 library(patchwork)
 p_roc + p_auc + p_n_circadian + p_res_nmetacell + p_density
@@ -440,7 +440,7 @@ VlnPlot(sc, features='pseudotime', group.by='ZT', pt.size = 0) +
   ggtitle(NULL) + 
   scale_fill_manual(values = rep("grey", 6)) + 
   xlab(NULL) + 
-  ylab("pseudotime") -> p_violinplot_ZT #Supp_Fig8G
+  ylab("pseudotime") -> p_violinplot_ZT #Fig_S8G
 
 ####VlnPlot hepatocyte subtype
 res_ = 2.5
@@ -464,7 +464,7 @@ VlnPlot(sc, features='pseudotime', group.by='cluster', pt.size = 0) +
   ggtitle(NULL) + 
   xlab("Hepatocytes Subtype") + 
   ylab("pseudotime") + 
-  theme(axis.text.x = element_text(angle=90, size = 8)) -> p_violinplot_cluster #Supp_Fig8F
+  theme(axis.text.x = element_text(angle=90, size = 8)) -> p_violinplot_cluster #Fig_S8F
 
 # Plot Hepatocytes pseudotime
 FeaturePlot(sc, features = "pseudotime", reduction = "multicca.umap")
@@ -500,7 +500,7 @@ c("Cyp2f2", "Cyp2e1") %>%
       theme_classic()
   }) -> p_transient_gene_activity #Fig_4C
 
-# Plot circadian genes, spatial genes, and spatial+circadian genes (Fig 4D)
+# Plot circadian genes, spatial genes, and spatial+circadian genes (Fig_4D)
 readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.rna.rds") -> rna.p.value
 readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.gene_activity.rds") -> atac.p.value
 readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_rna.rds") -> output.rna.list
@@ -530,7 +530,7 @@ c("Arntl", "Glul", "Cyp2e1", "Gsta3", "Acly", "Pck1", "Elovl3", "Arg1") %>%
       scale_x_continuous(breaks = seq(2, 22, 4)) -> p
   }) -> p_list
 
-patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p
+patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p #Fig_4E
 
 c("Arntl", "Glul", "Cyp2e1", "Gsta3", "Acly", "Pck1", "Elovl3", "Arg1") %>% 
   "names<-"(.,.) %>% 
@@ -557,7 +557,7 @@ c("Arntl", "Glul", "Cyp2e1", "Gsta3", "Acly", "Pck1", "Elovl3", "Arg1") %>%
     p + scale_color_gradient(low = "grey", high = "red") -> p
   }) -> p_list
 
-patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p
+patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p #Fig_S22B
 
 # FISH validation (Acly, Pck1, Elovl3)
 ##Validation by smRNA Fish ----
@@ -614,7 +614,7 @@ names(list_) %>%
       ylab("mRNA concentration [log2]") + 
       xlab("Distance from central vein (µm)") -> p
   }) -> p_list
-patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p
+patchwork::wrap_plots(p_list, ncol = 4, guides = "collect") -> p #Fig_4F
 
 # Plot Actb and Agxt (Fig 4F)
 c("Actb", "Agxt") %>% 
@@ -670,7 +670,7 @@ c("Actb", "Agxt") %>%
 
 patchwork::wrap_plots(p_list, ncol = 2, guides = "collect") -> p
 
-# FISH validation agxt (Fig 4F)
+# FISH validation agxt (Fig 4F) #Deleted
 list_QC = list()
 c("Agxt") %>% 
   "names<-"(.,.) %>% 
@@ -752,7 +752,7 @@ list_summary_1$Agxt %>%
   xlab("Destance from CV") + 
   ylab("log2[RNA concentration]") -> p1_1
 
-# Plot clock genes (Supp Fig 18)
+# Plot clock genes (Fig_S20)
 c("Clock", "Npas2", "Bhlhe40", "Bhlhe41", "Dbp", "Nfil3", "Nr1d1", "Rorc", "Cry1", "Ciart", "Per1", "Per2") %>% 
   "names<-"(.,.) %>% 
   map(function(x){
@@ -882,32 +882,13 @@ list(
 ) %>% 
   ggvenn::ggvenn() -> ggvenn_new
 
-ggvenn_new -> ggvenn_new_ATAC #Fig_S23A
-
-
-run_venn = function(){
-  list(p_val = atac.p.value) %>% 
-    map(function(x){
-      df_ = x
-      list(
-        `Circadian` = df_ %>% filter(Circadian_p.adj < 0.01) %>% .$Gene,
-        `Transient` = df_ %>% filter(Transient_p.adj < 0.01) %>% .$Gene,
-        `Circadian+Transient` = df_ %>% filter(Circadian_transient_p.adj < 0.01) %>% .$Gene
-      )
-    }) %>% .[[1]] %>% 
-    venn.diagram(., fill = c("#E69F00", "#56B4E9", "#CC79A7"), 
-                 alpha = c(0.8, 0.8, 0.8), lwd =0, filename=NULL,
-                 disable.logging = TRUE) %>% 
-    grobTree()
-}
-p_venn_ = run_venn()
-p_venn_ = ggplot() + annotation_custom(p_venn_) # ATAC activity venn diagram (Supp Fig 20)
+ggvenn_new -> ggvenn_new_ATAC #Fig_S22A
 
 # Plot Top 10 genes for each group
-readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.rna.rds") -> rna.p.value
-readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_rna.rds") -> output.rna.list
+#readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.rna.rds") -> rna.p.value
+#readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_rna.rds") -> output.rna.list
 
-rna.p.value %>% dplyr::filter((Circadian_transient_p.adj < 0.01)|(Transient_p.adj < 0.01)) %>% .$Gene %>% 
+rna.p.value %>% dplyr::filter(((Circadian_transient_p.adj < 0.01)&(fc > 1.7))|(Transient_p.adj < 0.01)) %>% .$Gene %>% 
   map(function(x){
     gene_ = x 
     rna.p.value %>% filter(Gene == gene_) %>% .$Circadian_transient_p.adj -> p.adj
@@ -928,9 +909,9 @@ list(p_val = rna.p.value) %>%
   map(function(x){
     df_ = x
     list(
-      `Circadian` = df_ %>% filter(Circadian_p.adj < 0.01) %>% .$Gene,
+      `Circadian` = df_ %>% filter(Circadian_p.adj < 0.01, fc > 1.7) %>% .$Gene,
       `Transient` = df_ %>% filter(Transient_p.adj < 0.01) %>% .$Gene,
-      `Circadian+Transient` = df_ %>% filter(Circadian_transient_p.adj < 0.01) %>% .$Gene
+      `Circadian+Transient` = df_ %>% filter(Circadian_transient_p.adj < 0.01, fc > 1.7) %>% .$Gene
     )
   }) %>% .[[1]] %>% 
   ggvenn::list_to_data_frame() %>% {
@@ -1008,13 +989,13 @@ venn_gene_list_1 %>%
           ggtitle(sprintf("%s\nC p.adj=%s\nT p.adj=%s\nC&T p.adj=%s", gene_, circadian_padj, transient_padj, both)) -> p 
       }) -> p_list
     patchwork::wrap_plots(p_list, ncol = 5, guides = "collect") -> p
-  }) -> p_list #Supp_Fig17
+  }) -> p_list #Fig_S20
 
 # KEGG analysis of circadian + transient genes (PN vs CV)
 library(clusterProfiler)
 library(org.Mm.eg.db)
 
-readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.rna.rds") -> rna.p.value
+#readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results/res_2.5.rna.rds") -> rna.p.value
 readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_rna.rds") -> output.rna.list
 readRDS("~/Dropbox/singulomics/github_rda/gene.ref.rds") -> gene.ref
 
@@ -1022,9 +1003,9 @@ list(p_val = rna.p.value) %>%
   map(function(x){
     df_ = x
     list(
-      `Circadian` = df_ %>% filter(Circadian_p.adj < 0.01) %>% .$Gene,
+      `Circadian` = df_ %>% filter(Circadian_p.adj < 0.01, fc > 1.7) %>% .$Gene,
       `Transient` = df_ %>% filter(Transient_p.adj < 0.01) %>% .$Gene,
-      `Circadian+Transient` = df_ %>% filter(Circadian_transient_p.adj < 0.01) %>% .$Gene
+      `Circadian+Transient` = df_ %>% filter(Circadian_transient_p.adj < 0.01, fc > 1.7) %>% .$Gene
     )
   }) %>% .[[1]] %>% 
   purrr::reduce(., intersect) -> intersected_genes
@@ -1098,9 +1079,9 @@ c("CV", "PN") %>%
       theme_classic() + 
       ggtitle(group_)
   }) -> p_list
-patchwork::wrap_plots(p_list, ncol = 2) # Supp Fig 19B
+patchwork::wrap_plots(p_list, ncol = 2) # Fig_S21B
 
-# Plot heatmap of the 1504 spatial + circadian genes
+# Plot heatmap of the spatial + circadian genes
 output.rna.list[intersected_genes] %>% 
   #  .[1:2] %>% 
   map2(.x=.,.y=names(.),.f=function(x,y){
@@ -1225,7 +1206,7 @@ c(4,1,2,3) %>%
 
   } -> p_ATAC
 
-patchwork::wrap_plots(p_RNA, p_ATAC, ncol = 2, guides = "collect") #Supp Fig 19A
+patchwork::wrap_plots(p_RNA, p_ATAC, ncol = 2, guides = "collect") #Fig_S21A
 
 # 6. Hepatocytes spatial and circadian CREs ----
 
@@ -1605,7 +1586,7 @@ gene_peak_cor_df_2$linked_by %>%
   ggplot(aes(x = linked_by, y = count, fill = linked_by)) + 
   geom_bar(stat = "identity") + 
   scale_y_break(breaks = c(1000, 5000), scales = 0.4) +  
-  theme_classic() -> p_4I#Fig_4I ----
+  theme_classic() -> p #Fig_4H ----
 
 p_4I$data
 
@@ -1622,7 +1603,7 @@ gene_peak_cor_df_2 %>% drop_na() %>%
     linked_by == "spatial_temporal" ~ "Spatial & Circadian", 
   )) -> gene_peak_cor_df_3
 
-gene_peak_cor_df_3 %>% drop_na() %>% {write.csv(., "~/Downloads/supplementary_table_3.csv", row.names = F, quote = F)} #Table S3
+gene_peak_cor_df_3 %>% drop_na() %>% {write.csv(., "~/Downloads/supplementary_table_3.csv", row.names = F, quote = F)} #Table_S3
 
 #CRE motif analysis ----
 load("~/Dropbox/singulomics/github_rda/trajectory_analysis.rda")
@@ -1676,7 +1657,7 @@ spatial_circadian_CRE_TF_motif %>%
 
 patchwork::wrap_plots(p_spatial, p_spatialtemporal, p_circadian, ncol = 3) -> p #Fig_S24
 
-# Plot Arntl, Glul and Pck1 (Fig 4G)
+# Plot Arntl, Glul and Pck1 (Fig_4G)
 
 ## Coverage plots ##
 LinkPlot_custom = function(object, region, links, extend.upstream, extend.downstream, assay = "ATAC"){
@@ -1890,10 +1871,10 @@ enriched_motifs %>%
       motif = motif,
     ) + 
       ggtitle(sprintf("p=%.2e", pval))
-  }) %>% patchwork::wrap_plots(., ncol = 3) -> p #Fig 4G
+  }) %>% patchwork::wrap_plots(., ncol = 3) -> p #Fig_4G
 ####
 
-# Coverage plots (Clock, Cry1, Dbp, Nr1d1, Rorc) (Supp Fig 21)
+# Coverage plots (Clock, Cry1, Dbp, Nr1d1, Rorc) (Fig_S23)
 
 # Clock
 gene_peak_cor_df_2 %>% dplyr::filter(gene == "Clock") %>% drop_na()

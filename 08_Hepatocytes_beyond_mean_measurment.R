@@ -1438,6 +1438,57 @@ return(p2)
 #p2$Neurons1+p2$Ependymocytes
 p2$Neurons1 #Fig_S17D
 
+#8, Plot cyclic genes ----
+c("Neurons1", "Ependymocytes") %>% 
+  "names<-"(.,.) %>% 
+#  .[1] %>% 
+  map(function(x){
+    celltype_ = x
+    c("Arntl", "Dbp", "Nr1d1", "Per2") %>% 
+      "names<-"(.,.) %>% 
+#      .[1] %>% 
+      map(function(x){
+        gene_ = x
+        list_RNA_norm[[celltype_]][gene_, ] %>% 
+          t() %>% as.data.frame() %>% 
+          "colnames<-"(., "measure") %>% 
+          dplyr::mutate(ZT = gsub("ZT(\\d+)_REP(\\d+)", "\\1", rownames(.))) %>% 
+          dplyr::mutate(REP = gsub("ZT(\\d+)_REP(\\d+)", "\\2", rownames(.))) %>% 
+          group_by(ZT) %>% 
+          summarise(mean_measure = mean(measure), sd = sd(measure)) %>% 
+          dplyr::mutate(gene = gene_, group = "mean") -> df_mean
+        
+        list_non_zero_prop[[celltype_]][gene_, ] %>% 
+          t() %>% as.data.frame() %>% 
+          "colnames<-"(., "measure") %>% 
+          dplyr::mutate(ZT = gsub("ZT(\\d+)_REP(\\d+)", "\\1", rownames(.))) %>% 
+          dplyr::mutate(REP = gsub("ZT(\\d+)_REP(\\d+)", "\\2", rownames(.))) %>% 
+          group_by(ZT) %>% 
+          summarise(mean_measure = mean(measure), sd = sd(measure)) %>% 
+          dplyr::mutate(gene = gene_, group = "nonzero") -> df_non_zero
+        
+        scale_factor = max(df_mean$mean_measure)/max(df_non_zero$mean_measure)
+        df_non_zero$mean_measure = df_non_zero$mean_measure*scale_factor
+        
+        rbind(df_mean, df_non_zero) -> df_
+        df_ %>% 
+          ggplot(aes(x = ZT, y = mean_measure, group = group, color = group, fill = group)) +
+          geom_line() + 
+          geom_ribbon(aes(ymin = mean_measure - sd, ymax = mean_measure + sd), alpha = 0.3, color = NA) + 
+          scale_y_continuous(name = "Mean", sec.axis = sec_axis(~./scale_factor, name = "Nonzero_Prop")) -> p
+        
+        #pval
+        list_RNA_norm_pval[[celltype_]] %>% dplyr::filter(Gene == gene_) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .) -> mean_adj_p
+        list_non_zero_prop_pval[[celltype_]] %>% dplyr::filter(Gene == gene_) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .) -> non_zero_adj_p
+        
+        p + 
+          scale_color_manual(values = c(mean="#56B4E9", nonzero="#009E73")) +
+          scale_fill_manual(values = c(mean="#56B4E9", nonzero="#009E73")) +
+          ggtitle(sprintf("%s:%s\n(Mean) p.adj=%s\n(Nonzero prop) p.adj=%s", celltype_, gene_, mean_adj_p, non_zero_adj_p)) -> p
+      })
+  }) -> p_list
+patchwork::wrap_plots(p_list$Neurons1, ncol = 2, guides = "collect") -> p #Fig_S17B
+
 # 18. Validation drosophila brain ----
 library(tidyverse)
 library(Seurat)
@@ -1665,7 +1716,7 @@ sc@meta.data %>% dplyr::mutate(celltype = gsub(".+:(.+)", "\\1", Idents)) -> sc@
 DimPlot(sc, group.by = "celltype", label = TRUE, reduction = "rna_integrated_tsne", repel = TRUE) + 
   theme(legend.position = "none") -> p_tsne
 p_tsne + theme_classic() + theme(legend.position = "none") + 
-  ggtitle(NULL) -> p_tsne #Supp Fig 16A
+  ggtitle(NULL) -> p_tsne #Fig_S18A
 
 sc@assays$RNA@counts %>% 
   as.data.frame() %>% 
@@ -1927,7 +1978,7 @@ c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>%
         non_zero_proportion_p_adj = res_non_zero_prop[[neuron_type_]]$df_ %>% filter(Gene == gene_) %>% .$cauchy_BH.Q %>% sprintf("%.2e", .)
         p + ggtitle(sprintf("%s\n(Mean) p.adj=%s\n(Nonzero) p.adj=%s", gene_, mean_p_adj, non_zero_proportion_p_adj))
       }) -> p_list_1
-  }) -> p_list_1 #Supp Fig 16B
+  }) -> p_list_1 #Fig_S18B
 
 
 c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
@@ -1939,7 +1990,7 @@ c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>%
       `Nonzero Prop.` = res_non_zero_prop[[neuron_type_]]$df_ %>% filter(cauchy_BH.Q < 0.05) %>% .$Gene
     ) %>% ggvenn::ggvenn(., fill_color = c("lightblue", "lightgreen")) -> p_venn
   }) -> p_venn
-p_venn$all_cyclic_neuron #Supp Fig 16C
+p_venn$all_cyclic_neuron #Fig_S18C
 #p_venn$DN1p_cyclic_neuron
 
 
@@ -1973,7 +2024,7 @@ c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>%
           ylab("-log10(p.adj):non zero prop.")
       } -> p_val_correlation
   }) -> p_val_correlation
-p_val_correlation$all_cyclic_neuron #Fig 3E
+p_val_correlation$all_cyclic_neuron #Fig_3E
 #p_val_correlation$DN1p_cyclic_neuron
 
 
@@ -2015,7 +2066,7 @@ c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>%
           scale_y_continuous(breaks = seq(-10,20,5))
       } -> p_phase_correlation
   }) -> p_phase_correlation
-p_phase_correlation$all_cyclic_neuron #Fig 3E
+p_phase_correlation$all_cyclic_neuron #Fig_3E
 #p_phase_correlation$DN1p_cyclic_neuron
 
 # Amplitude correlation (Mean vs Non zero prop.)
@@ -2049,7 +2100,7 @@ c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>%
         #      scale_x_continuous(limits = c(-10, 10))
       } -> p_amp_correlation
   }) -> p_amp_correlation
-p_amp_correlation$all_cyclic_neuron #Fig 3E
+p_amp_correlation$all_cyclic_neuron #Fig_3E
 #p_amp_correlation$DN1p_cyclic_neuron
 
 c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
@@ -2111,7 +2162,7 @@ c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>%
       ylab("Normalized expression") -> p_1
   })-> p_1
 #p_1$all_cyclic_neuron+p_1$DN1p_cyclic_neuron
-p_1$all_cyclic_neuron #Supp Fig 16D
+p_1$all_cyclic_neuron #Fig_S18D
 
 c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>% 
   "names<-"(.,.) %>% 
@@ -2148,4 +2199,4 @@ c("all_cyclic_neuron", "DN1p_cyclic_neuron") %>%
       ylab("Non zero proportion") -> p_2
   }) -> p_2
 #p_2$all_cyclic_neuron+p_2$DN1p_cyclic_neuron
-p_2$all_cyclic_neuron #Supp Fig 16D
+p_2$all_cyclic_neuron #Fig_S18D
