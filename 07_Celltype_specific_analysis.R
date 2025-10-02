@@ -2188,7 +2188,7 @@ circacompare_res_2 %>%
   theme_classic() + 
   ggtitle(sprintf("r=%s", cor_)) -> p
 p + geom_text(data = subset(circacompare_res_2, Gene %in% clock_genes), aes(label = Gene), vjust = -1) -> p
-p_cor = p #Supp_fig_13A
+p_cor = p #Fig_S13A
 
 circacompare_res_2 %>% dplyr::filter(Gene %in% clock_genes)
 
@@ -2197,7 +2197,7 @@ circacompare_res_2 %>%
   geom_boxplot(outlier.shape = NA) + 
   coord_cartesian(ylim = c(0,120)) + 
   ylab("Gene length (Kb)") + 
-  theme_classic() -> p_gene_length #Supp_fig_13B
+  theme_classic() -> p_gene_length #Fig_S13B
 
 pairwise.t.test(x = p_gene_length$data$width, g = p_gene_length$data$group)
 
@@ -2206,7 +2206,7 @@ circacompare_res_2 %>%
   geom_boxplot(outlier.shape = NA) + 
   coord_cartesian(ylim = c(0,0.6)) + 
   ylab("rAMP (RNA expression)") + 
-  theme_classic() -> p_rAMP #Supp_fig_13B
+  theme_classic() -> p_rAMP #Fig_S13B
 
 pairwise.t.test(x = p_gene_length$data$MetaCycle_meta2d_rAMP, g = p_gene_length$data$group)
 
@@ -2268,7 +2268,7 @@ df_ %>%
   column_to_rownames("Gene") %>% 
   dplyr::mutate(across(.cols = 1:3, function(x){-log(x,10)})) %>%
   "colnames<-"(., c("-log10(JTK Cycle + HR cauchy p-value)", "-log10(JTK Cycle p-value)", "-log10(HR p-value)", "significance")) %>% 
-  GGally::ggpairs(., columns = 1:3, aes(color = significance, alpha = 0.5)) -> p_snRNA_pval_cor
+  GGally::ggpairs(., columns = 1:3, aes(color = significance, alpha = 0.5)) -> p_snRNA_pval_cor #Fig_S9B
 
 source("~/Dropbox/singulomics/github/Calculate_HMP.R")
 
@@ -2329,7 +2329,7 @@ res_list$`3_meatacell`$metacell_1_2_3 %>%
   column_to_rownames("Gene") %>% 
   dplyr::mutate(across(.cols = 1:3, function(x){-log(x,10)})) %>%
   "colnames<-"(., c("-log10(JTK Cycle + HR cauchy p-value)", "-log10(JTK Cycle p-value)", "-log10(HR p-value)", "significance")) %>% 
-  GGally::ggpairs(., columns = 1:3, aes(color = significance, alpha = 0.5)) -> p_GSE70499_pval_cor
+  GGally::ggpairs(., columns = 1:3, aes(color = significance, alpha = 0.5)) -> p_GSE70499_pval_cor #Fig_S9B
 
 rm(list=ls())
 
