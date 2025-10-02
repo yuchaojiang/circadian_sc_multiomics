@@ -1796,7 +1796,7 @@ trios_res_df_2_1 %>%
   dplyr::select(gene, peak, TF, coef, pval, adj, model, sign, level, gene.pos, gene_strand, tf.pos, peak_to_tss_dist, peak_biotype, gene_phase, TF_cauchy_BH.Q, 
                 TF_phase, peak_cauchy_BH.Q, peak_phase, chromatin_state_15, chromatin_state_18, CHI_C_validate, ChIP_seq_validated) %>% 
   dplyr::filter((CHI_C_validate == TRUE|ChIP_seq_validated==TRUE)) %>% 
-  write.csv(x = ., file = "~/Downloads/00_Supp_Table_4_new.csv", quote = F, col.names = T, row.names = F)
+  write.csv(x = ., file = "~/Downloads/00_Supp_Table_4_new.csv", quote = F, col.names = T, row.names = F) #Table_S4
 ####
 
 ## Plot ARNTL target gene trios ##
