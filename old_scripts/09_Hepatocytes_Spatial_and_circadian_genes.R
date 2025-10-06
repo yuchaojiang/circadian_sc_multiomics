@@ -209,89 +209,120 @@ c("rna", "gene_activity") %>%
   }) -> list_p_value 
 
 # 4. Resolution tuning ----
-read.csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", header = T) -> RNA_mean
-read.csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/Gene_Activity_Mean.csv", header = T) -> ATAC_mean
+readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_rna.rds") -> output.rna.list
+readRDS("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/res_2.5_gene_activity.rds") -> output.atac.list
 
-list_df = 
-  list(
-    RNA = RNA_mean, 
-    ATAC = ATAC_mean
-  )
-
-list_df %>% 
+output.rna.list %>% 
+  #  .[1:10] %>% 
   purrr::map(function(df_){
-    df_ %>% pivot_longer(-Gene, names_to = "ZT", values_to = "Expression") %>% dplyr::mutate(ZT = gsub("ZT(\\d+)_.+", "\\1", ZT) %>% as.numeric()) -> df_
-    df_ %>% group_by(Gene, ZT) %>% summarise(Mean_Expression = mean(Expression)) %>% ungroup() %>% as.data.frame() -> df_mean
-    df_mean %>% group_by(Gene) %>% summarise(Max = max(Mean_Expression), Min = min(Mean_Expression)) %>% ungroup() %>% as.data.frame() -> df_range
-    df_range %>% dplyr::mutate(fc = Max/Min) %>% dplyr::mutate(log2_fc = log(fc, 2)) -> df_final
-  }) -> list_df_fc
+    gene_ = df_$Gene %>% unique()
+    df_ %>% group_by(ZT) %>% 
+      summarise(Mean_expression = mean(Mean_expression)) %>% 
+      ungroup() -> df_
+    data.frame(Gene = gene_, 
+               Max = df_$Mean_expression %>% max(),
+               Min = df_$Mean_expression %>% min()
+    ) -> df_1
+  }) %>% do.call(rbind, .) -> df_RNA_fc
 
-#Some fc show Nan or Inf ,Add pseudo count (non zero min) to and re-calculate fc and log2_fc
-list_df_fc %>% 
+df_RNA_fc %>% 
+  {
+    df_ = .
+    nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_ %>% dplyr::mutate(fc = (Max+nonzero_min)/(Min+nonzero_min)) %>% 
+      dplyr::mutate(log2_fc = log(fc, 2))
+  } -> df_RNA_fc
+
+output.atac.list %>% 
+  #  .[1:10] %>% 
   purrr::map(function(df_){
-    df_$Min %>% .[.!=0] %>% min() -> non_zero_min
-    df_[["fc"]] = (df_[["Max"]]+non_zero_min)/(df_[["Min"]]+non_zero_min)
-    df_[["log2_fc"]] = log(df_[["fc"]], 2)
-    return(df_)
-  }) -> list_df_fc
+    gene_ = df_$Gene %>% unique()
+    df_ %>% group_by(ZT) %>% 
+      summarise(Mean_expression = mean(Mean_expression)) %>% 
+      ungroup() -> df_
+    data.frame(Gene = gene_, 
+               Max = df_$Mean_expression %>% max(),
+               Min = df_$Mean_expression %>% min()
+    ) -> df_1
+  }) %>% do.call(rbind, .) -> df_ATAC_fc
 
-list_df_fc$RNA %>% dplyr::filter(fc > 1.6) %>% .$Gene -> RNA_genes_fc_
-list_df_fc$ATAC %>% dplyr::filter(fc > 1.1) %>% .$Gene -> ATAC_genes_fc_
+df_ATAC_fc %>% 
+  {
+    df_ = .
+    nonzero_min = df_$Min %>% .[.!=0] %>% min()
+    df_ %>% dplyr::mutate(fc = (Max+nonzero_min)/(Min+nonzero_min)) %>% 
+      dplyr::mutate(log2_fc = log(fc, 2))
+  } -> df_ATAC_fc
 
-source("~/Dropbox/singulomics/github/Calculate_HMP.R") 
-read.csv(file = "~/Dropbox/singulomics/github_rda/output/Hepatocytes_rhythmicity/RNA_Mean.csv", header = T) %>% .$Gene -> genes_
+df_RNA_fc %>% dplyr::filter(fc > 1.7) %>% .$Gene -> RNA_genes_fc_
+df_ATAC_fc %>% dplyr::filter(fc > 1.1) %>% .$Gene -> ATAC_genes_fc_
+
 ggroc_list = list()
 density_list = list()
-c("RNA", "gene_activity") %>% 
-#  .[1] %>% 
-  purrr::map(function(assay_){
-    if(assay_ == "RNA"){
-      se_genes_ = RNA_genes_fc_
-    } else {
-      se_genes_ = ATAC_genes_fc_
+c("rna", "gene_activity") %>% 
+  "names<-"(.,.) %>% 
+  map(function(x){
+    seq_ = x
+    if (seq_ == "rna"){
+      se_genes = RNA_genes_fc_
+    }else{
+      se_genes = ATAC_genes_fc_
     }
+    print(seq_)
     sprintf("res_%s", seq(0.5,20,0.5)) %>% 
-#      .[1:2] %>% 
-      purrr::map(function(res_){
-        list.files("~/Dropbox/singulomics/github_rda/output/Hepatocytes/Cauchy", pattern = sprintf("%s_%s", res_, assay_), full.names = T) -> file_
-        read.csv(file_, header = T) -> df_
-        df_ %>% column_to_rownames("Gene") %>% .[genes_, ] %>% rownames_to_column("Gene") -> df_
-        df_ %>% dplyr::select(Gene, MetaCycle_JTK_pvalue,  HR_p.value) -> df_
-        recal_cauchy_p_and_hmp(df_ = df_) -> df_
-        
-        df_raw = df_
-        df_raw[,c("Gene", "cauchy_BH.Q")] %>% mutate(resolution = gsub("res_(.+)", "\\1", res_) %>% as.numeric()) ->> density_list[[assay_]][[res_]]
-        
-        df_ %>% dplyr::filter(Gene %in% se_genes_) %>% dplyr::filter(cauchy_BH.Q < 0.01) -> df_
+      #      c("res_2.5") %>% 
+      "names<-"(.,.) %>% 
+      map(function(x){
+        res_ = x
+        print(res_)
+        list.files("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/results", pattern = sprintf("%s\\.%s\\.rds", res_, seq_), full.names = T) -> file_
+        readRDS(file_) -> df_
         n_metacell = readRDS(sprintf("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/%s_rna.rds", res_))[[1]]$cluster %>% unique() %>% length()
         
-        n_circadian = df_ %>% nrow()
-        data.frame(resolution = gsub("res_(.+)", "\\1", res_) %>% as.numeric(), n_circadian, n_metacell, threshold = 0.01) -> df_1
+        ###density plot###
+        df_[,c("Gene", "Circadian_p.adj")] %>% mutate(resolution = gsub("res_(.+)", "\\1", res_) %>% as.numeric()) ->> density_list[[seq_]][[res_]]
+        ###
         
-        pos.genes=readRDS('~/Dropbox/singulomics/rda/pos.genes.RDS')
-        neg.genes=readRDS('~/Dropbox/singulomics/rda/neg.genes.RDS')
-        
-        df_raw %>% "rownames<-"(., .$Gene) %>% .[pos.genes, c("Gene", "cauchy_BH.Q")] %>% 
-          mutate(group = "pos.genes") %>% drop_na() -> df_pos
-        df_raw %>% "rownames<-"(., .$Gene) %>% .[neg.genes, c("Gene", "cauchy_BH.Q")] %>% 
-          mutate(group = "neg.genes") %>% drop_na() -> df_neg
-        print("Done")
-        
-        rbind(df_pos, df_neg) %>% 
-          mutate(response = ifelse(group == "pos.genes", 0, 1)) -> df_roc
-        pROC::roc(df_roc$response, df_roc$cauchy_BH.Q) -> roc_obj
-        ggroc_list[[assay_]][[res_]] <<- roc_obj
-        auc_ = roc_obj$auc %>% as.numeric()
-        df_1 %>% mutate(auc = auc_) -> df_1
-        df_1 %>% mutate(assay = assay_) -> df_1
-        ###End ###
-        
-        return(df_1)
+        c(0.05, 0.01) %>% 
+          "names<-"(., sprintf("p%s", .)) %>% 
+          map(function(x){
+            threshold_ = x
+            threshold_name_ = sprintf("p_%s", threshold_)
+            n_circadian = df_ %>% filter(Circadian_p.adj<=threshold_, Gene %in% se_genes) %>% nrow()
+            n_transient = df_ %>% filter(Transient_p.adj<=threshold_) %>% nrow()
+            n_both = df_ %>% filter(Circadian_transient_p.adj<=threshold_, Gene %in% se_genes) %>% nrow()
+            data.frame(resolution = res_, n_circadian, n_transient, n_both, n_metacell, threshold = threshold_) -> df_1
+            df_1 %>% mutate(resolution = gsub("res_(.+)", "\\1", resolution) %>% as.numeric()) -> df_1
+            
+            ##caluclate auc###
+            pos.genes=readRDS('~/Dropbox/singulomics/rda/pos.genes.RDS')
+            neg.genes=readRDS('~/Dropbox/singulomics/rda/neg.genes.RDS')
+            
+            df_ %>% "rownames<-"(., .$Gene) %>% .[pos.genes, c("Gene", "Circadian_p.adj")] %>% 
+              mutate(group = "pos.genes") %>% drop_na() -> df_pos
+            df_ %>% "rownames<-"(., .$Gene) %>% .[neg.genes, c("Gene", "Circadian_p.adj")] %>% 
+              mutate(group = "neg.genes") %>% drop_na() -> df_neg
+            print("Done")
+            
+            rbind(df_pos, df_neg) %>% 
+              mutate(response = ifelse(group == "pos.genes", 0, 1)) -> df_roc
+            pROC::roc(df_roc$response, df_roc$Circadian_p.adj) -> roc_obj
+            #            ggroc_list[[seq_]][[res_]] <<- roc_obj
+            ggroc_list[[threshold_name_]][[seq_]][[res_]] <<- roc_obj
+            auc_ = roc_obj$auc %>% as.numeric()
+            df_1 %>% mutate(auc = auc_) -> df_1
+            df_1 %>% mutate(assay = seq_) -> df_1
+            ###End ###
+            
+            return(df_1)
+          }) %>% do.call(rbind, .) -> df_
+        gc()
+        return(df_)
       }) %>% do.call(rbind, .) -> df_summary
   }) %>% do.call(rbind, .) -> df_summary
 df_summary %>% dplyr::arrange(resolution) -> df_summary
 
-ggroc_list %>% 
+ggroc_list$p_0.01 %>% 
   map2(.x=.,.y=names(.),.f=function(x,y){
     seq_ = y
     pROC::ggroc(x)$data %>%
@@ -300,18 +331,18 @@ ggroc_list %>%
       ggplot(aes(x = 1-specificity, y = sensitivity, color = res, group = res)) + 
       geom_line() + 
       scale_color_gradient(low = "blue", high = "red") + 
-      theme_classic() -> p
+      theme_classic() + 
+      ggtitle(sprintf("%s: H1 model. 12435 genes in total", seq_))-> p_roc
   }) -> p_roc #Fig_S8B
-patchwork::wrap_plots(p_roc, ncol = 2, guides = "collect")
 
-c(0.01) %>% 
+c(0.05, 0.01) %>% 
   "names<-"(., sprintf("p_%s", .)) %>% 
   map(function(x){
     threshold_ = x
     df_summary %>% dplyr::filter(threshold == threshold_) -> df_summary
     df_summary[, c("assay", "n_metacell", "auc")] %>% 
       distinct() %>% 
-      mutate(assay = factor(assay, levels = c("RNA", "gene_activity"))) %>% 
+      mutate(assay = factor(assay, levels = c("rna", "gene_activity"))) %>% 
       ggplot(aes(x = n_metacell, y = auc, color = assay)) + 
       geom_point() +
       geom_smooth(span = 0.15) + 
@@ -322,13 +353,13 @@ c(0.01) %>%
 
 df_summary %>% 
   filter(threshold == 0.01) %>% 
-  mutate(assay = factor(assay, levels = c("RNA", "gene_activity"))) %>% 
+  mutate(assay = factor(assay, levels = c("rna", "gene_activity"))) %>% 
   ggplot(aes(x = n_metacell, y = n_circadian, color = assay)) + 
-  geom_point() +
-  geom_smooth() + 
+           geom_point() +
+           geom_smooth() + 
   scale_color_manual(values = c("blue", "red")) +
   geom_vline(xintercept = 25, linetype = "dashed") + 
-  theme_classic() -> p_n_circadian #Fig_S8D
+           theme_classic() -> p_n_circadian #Fig_S8D
 
 df_summary[, c("resolution", "n_metacell")] %>% 
   distinct() %>%
@@ -349,8 +380,8 @@ density_list %>%
       }) %>% do.call(rbind, .)
   }) %>% do.call(rbind, .) %>% 
   as_tibble() %>% 
-  dplyr::mutate(assay = factor(assay, levels = c("RNA", "gene_activity"))) %>% 
-  ggplot(aes(x = cauchy_BH.Q, color = resolution, group = resolution)) + 
+  dplyr::mutate(assay = factor(assay, levels = c("rna", "gene_activity"))) %>% 
+  ggplot(aes(x = Circadian_p.adj, color = resolution, group = resolution)) + 
   scale_color_gradient(low = "blue", high = "red") +
   geom_density() + 
   theme_classic() + 
