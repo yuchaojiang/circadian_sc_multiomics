@@ -2001,6 +2001,12 @@ list_df %>%
       recal_cauchy_p_and_hmp(.) -> res_Mean
   }) -> list_res_df
 
+list_res_df %>% 
+  purrr::map2(.x=.,.y=names(.),.f=function(df_, assay_){
+    list_df_fc[[assay_]] -> df_fc
+    left_join(df_, df_fc, by="Gene")
+  }) -> res_list
+
 res_list$RNA %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.6, !is.na(MetaCycle_meta2d_AMP)) %>% nrow() #5192
 res_list$ATAC %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1, !is.na(MetaCycle_meta2d_AMP)) %>% nrow() #4825
 
