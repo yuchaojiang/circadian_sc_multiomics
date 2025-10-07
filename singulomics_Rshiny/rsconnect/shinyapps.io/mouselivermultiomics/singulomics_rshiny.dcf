@@ -5,6 +5,6 @@ account: mouselivermultiomics
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 15289508
-bundleId: 10841158
+bundleId: 11005369
 url: https://mouselivermultiomics.shinyapps.io/singulomics_rshiny/
 version: 1
