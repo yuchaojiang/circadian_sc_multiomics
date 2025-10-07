@@ -1,0 +1,10 @@
+name: singulomics_rshiny
+title:
+username: mouselivermultiomics
+account: mouselivermultiomics
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 15289508
+bundleId: 10841158
+url: https://mouselivermultiomics.shinyapps.io/singulomics_rshiny/
+version: 1
