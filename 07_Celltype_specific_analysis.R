@@ -1811,7 +1811,8 @@ make_output_mat_1 = function(res_df, dat_df){
     phase = (radian/(2*pi))*24
     return(phase)
   }
-  res_df %>% dplyr::mutate(Phase = radian_to_phase(HR_phi), Gene = toupper(Gene)) %>% dplyr::select(Gene, cauchy_p, cauchy_BH.Q, Phase, MetaCycle_meta2d_AMP, MetaCycle_meta2d_Base, MetaCycle_meta2d_rAMP, fc) -> res_df
+#  res_df %>% dplyr::mutate(Phase = radian_to_phase(HR_phi), Gene = toupper(Gene)) %>% dplyr::select(Gene, cauchy_p, cauchy_BH.Q, Phase, MetaCycle_meta2d_AMP, MetaCycle_meta2d_Base, MetaCycle_meta2d_rAMP, fc) -> res_df
+  res_df %>% dplyr::mutate(Phase = radian_to_phase(HR_phi), Gene = toupper(Gene)) %>% dplyr::select(Gene, cauchy_p, cauchy_BH.Q, Phase, Max, Min, fc) -> res_df
   dat_df$Gene = toupper(dat_df$Gene)
   left_join(x = res_df, y = dat_df, by = "Gene") %>% dplyr::arrange(cauchy_BH.Q) -> df_final
   return(df_final)
@@ -1820,6 +1821,10 @@ make_output_mat_1 = function(res_df, dat_df){
 make_output_mat_1(res_df = res_TF.exp, dat_df = TF.exp.ag_df) -> output_TF.exp
 make_output_mat_1(res_df = res_TF.activity, dat_df = TF.activity.ag_df) -> output_TF.activity
 make_output_mat_1(res_df = res_TF.motif, dat_df = TF.motif.ag_df) -> output_TF.motif
+
+output_TF.exp %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.6) %>% dim() #122
+output_TF.activity %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1) %>% dim() #179
+output_TF.motif %>% dplyr::filter(cauchy_BH.Q < 0.01, fc > 1.1) %>% dim() #235
 
 library(openxlsx)
 wb = createWorkbook()
