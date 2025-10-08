@@ -262,7 +262,8 @@ c("RNA", "gene_activity") %>%
         df_raw = df_
         df_raw[,c("Gene", "cauchy_BH.Q")] %>% mutate(resolution = gsub("res_(.+)", "\\1", res_) %>% as.numeric()) ->> density_list[[assay_]][[res_]]
         
-        df_ %>% dplyr::filter(Gene %in% se_genes_) %>% dplyr::filter(cauchy_BH.Q < 0.01) -> df_
+#        df_ %>% dplyr::filter(Gene %in% se_genes_) %>% dplyr::filter(cauchy_BH.Q < 0.01) -> df_
+        df_ %>% dplyr::filter(cauchy_BH.Q < 0.01) -> df_
         n_metacell = readRDS(sprintf("~/Dropbox/singulomics/github_rda/output/Hepatocytes_transient/normalized_data/%s_rna.rds", res_))[[1]]$cluster %>% unique() %>% length()
         
         n_circadian = df_ %>% nrow()
